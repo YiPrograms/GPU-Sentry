@@ -11,15 +11,18 @@ CUDA application
       |
       v
 CUDA driver hook
+  captures modules, functions, and kernel launches
+      |
+      v  TCP GPU_SENTRY_SERVER_ADDR
+Go collector
+  resolves launch metadata and stores captures
+      |
+      v  Unix socket /tmp/gpu-sentry.sock
+Python processor
+  disassembles GPU code and builds normalized SASS windows
       |
       v
-Collector
-      |
-      v
-SASS processing
-      |
-      v
-Classifier
+ModernBERT classifier
       |
       v
 Decision policy
