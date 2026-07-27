@@ -54,8 +54,8 @@ artifacts/                   generated captures, models, and reports
 
 - Linux x86-64
 - NVIDIA GPU and driver
-- CUDA 12.6 with `nvcc`, `nvdisasm`, and `cuobjdump`
-- CUPTI from the CUDA toolkit
+- A CUDA toolkit compatible with the GPU and driver, including `nvcc`,
+  `nvdisasm`, `cuobjdump`, and CUPTI
 - Python 3.11 or newer
 - Go, GCC, G++, GNU ld, and make
 - Docker for the Ubuntu 20.04 build
@@ -66,6 +66,7 @@ artifacts/                   generated captures, models, and reports
 Create the Python environment:
 
 ```bash
+git clone git@github.com:YiPrograms/GPU-Sentry.git
 cd GPU-Sentry
 
 python -m venv .venv
@@ -161,6 +162,33 @@ CUDA applications can now run normally:
 ```bash
 your-cuda-program [arguments...]
 ```
+
+### Verify Detection
+
+In another shell, check the GPU compute capability:
+
+```bash
+nvidia-smi --query-gpu=compute_cap --format=csv,noheader
+```
+
+Build the SHA-256d test workload for that capability. For example, use
+`CUDA_ARCH=sm_70` for compute capability 7.0:
+
+```bash
+make -C workloads/synthetic \
+  NVCC=/usr/local/cuda/bin/nvcc \
+  CUDA_ARCH=sm_70 \
+  build/mining/pure_hash_nonce_search/sha256d_mono
+```
+
+Run the workload:
+
+```bash
+workloads/synthetic/build/mining/pure_hash_nonce_search/sha256d_mono 60
+```
+
+The default policy reports cryptomining and terminates the process with exit
+code `101`. Captures are written under `artifacts/captures/`.
 
 The deployment script sets `GPU_SENTRY_DISABLE=1` for the processor and
 collector so the processor's PyTorch inference is not captured recursively.

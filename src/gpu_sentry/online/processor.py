@@ -76,6 +76,7 @@ class SessionState:
     session_dir: Path
     l0_scheduler: L0WindowScheduler
     policy: DecisionPolicy
+    analysis_lock: threading.Lock = field(default_factory=threading.Lock)
     artifacts: dict[tuple[int, str], KernelArtifact] = field(default_factory=dict)
     artifacts_by_code: dict[int, list[KernelArtifact]] = field(default_factory=dict)
     dropped_unready_launches: int = 0
@@ -390,6 +391,18 @@ class OnlineProcessor:
             if state is None or not state.active:
                 log(f"code analysis skipped session={short_session(session_id)} reason=session_inactive")
                 return []
+        with state.analysis_lock:
+            with self.lock:
+                if not state.active:
+                    return []
+            return self._analyze_code_object_files(state, message)
+
+    def _analyze_code_object_files(
+        self,
+        state: SessionState,
+        message: dict[str, Any],
+    ) -> list[KernelArtifact]:
+        session_id = state.session_id
         code_id = int(message["code_id"])
         source_path = Path(str(message["path"]))
         started = time.monotonic()
@@ -534,29 +547,11 @@ class OnlineProcessor:
                 artifact = self._artifact_for_launch(state, launch)
                 if artifact is None:
                     state.dropped_unready_launches += 1
-                    if state.dropped_unready_launches <= 5 or state.dropped_unready_launches % 100 == 0:
-                        log(
-                            f"kernel launch session={short_session(state.session_id)} "
-                            f"code_id={launch.get('code_id')} kernel={launch.get('kernel_name')}"
-                        )
                     continue
                 for ready_launch in launches_for_artifact(launch, artifact):
                     windows = state.l0_scheduler.add_launch(ready_launch)
-                    for window in windows:
-                        max_ratio = float(window.features.get("max_bitwise_integer_ratio", 0.0))
-                        log(
-                            f"L0 window session={short_session(state.session_id)} id={window.window_id} "
-                            f"type={window.window_type} launches={len(window.launches)} "
-                            f"tokens={window.features.get('token_cost')} "
-                            f"max_bitwise_integer_ratio={max_ratio:.6f} "
-                            f"reasons={','.join(window.trigger_reason)}"
-                        )
-                        ready_windows.append(window)
+                    ready_windows.extend(windows)
         for window in ready_windows:
-            log(
-                f"window ready session={short_session(session_id)} "
-                f"id={window.window_id}; queueing policy score"
-            )
             self._submit_l1_window(session_id, window)
         return []
 
@@ -578,10 +573,6 @@ class OnlineProcessor:
                     ready_responses.extend(self._release_ordered_policy_verdicts_locked(state))
             elif signature_key and signature_key in state.pending_signature_windows:
                 state.pending_signature_windows[signature_key].append(window)
-                log(
-                    f"L1 window cached-pending session={short_session(session_id)} "
-                    f"window={window.window_id} signature_occurrence={window.features.get('signature_occurrence_index')}"
-                )
             else:
                 if signature_key:
                     state.pending_signature_windows[signature_key] = []
@@ -635,6 +626,8 @@ class OnlineProcessor:
             else:
                 state.pending_policy_verdicts[int(window_index)] = verdict
                 for cached_window in pending_signature_windows:
+                    if state.emitted_terminal_verdict:
+                        break
                     cached_index = _window_index(cached_window.window_id)
                     cached_verdict = self._cached_l1_verdict(
                         state,
@@ -745,11 +738,6 @@ class OnlineProcessor:
     ) -> dict[str, Any]:
         prediction = dict(raw_prediction)
         action = "terminate" if prediction.get("suspicious") else "log"
-        log(
-            f"L1 window verdict session={short_session(state.session_id)} window={window.window_id} "
-            f"action={action} source=cached_signature "
-            f"source_window={window.features.get('signature_source_window_id')}"
-        )
         return {
             "type": "detection_verdict",
             "session_id": state.session_id,
