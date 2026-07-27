@@ -41,25 +41,25 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	cfg.Storage.CollectorOutputDir = *captureDir
+	cfg.CaptureDir = *captureDir
 
-	if err := os.MkdirAll(cfg.Storage.CollectorOutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.CaptureDir, 0o755); err != nil {
 		fatal(err)
 	}
 
-	ln, err := net.Listen("tcp", cfg.Collector.ListenAddr)
+	ln, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
 		fatal(err)
 	}
 	defer ln.Close()
 
-	c := &collector{root: cfg.Storage.CollectorOutputDir, sessions: make(map[string]*clientSession), cfg: cfg}
+	c := &collector{root: cfg.CaptureDir, sessions: make(map[string]*clientSession), cfg: cfg}
 	c.online = newOnlineClient(cfg)
 	c.online.start()
 	c.batcher = newLaunchBatcher(c.online, cfg)
 	go c.handleVerdicts()
-	logf("online detection enabled processor_socket=%s", cfg.Transport.ProcessorSocket)
-	logf("GPU-Sentry collector listening on %s, output %s", cfg.Collector.ListenAddr, cfg.Storage.CollectorOutputDir)
+	logf("online detection enabled processor_socket=%s", cfg.ProcessorSocket)
+	logf("GPU-Sentry collector listening on %s, output %s", cfg.ListenAddress, cfg.CaptureDir)
 
 	for {
 		conn, err := ln.Accept()
@@ -313,7 +313,7 @@ func (c *collector) sendControl(sessionID string, verdict processorVerdict) erro
 	}
 	message := verdict.Message
 	if message == "" {
-		message = c.cfg.Enforcement.Message
+		message = defaultControlMessage
 	}
 	miningProbability := 0.0
 	if prediction := verdict.Prediction; prediction != nil {

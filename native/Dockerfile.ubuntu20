@@ -4,7 +4,6 @@ FROM ubuntu:20.04 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG GO_VERSION=1.23.12
-ARG DEBUG=0
 ARG TARGETARCH=amd64
 ARG REAL_LIBCUDA
 
@@ -35,8 +34,7 @@ COPY . .
 COPY ${REAL_LIBCUDA} /src/libcuda.so.1.real
 
 RUN make clean && \
-    make "DEBUG=${DEBUG}" \
-      BUILD=build-ubuntu20 \
+    make BUILD=build-ubuntu20 \
       REAL_LIBCUDA=libcuda.so.1.real \
       all
 

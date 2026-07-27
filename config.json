@@ -44,7 +44,6 @@
   "online": {
     "analysis_workers": 2,
     "inference_workers": 1,
-    "batch_size": 1,
     "device": "auto"
   }
 }

@@ -15,30 +15,18 @@ import (
 )
 
 const defaultOnlineConfigPath = "config.json"
+const defaultControlMessage = "GPU-Sentry stopped a suspected mining process"
+const socketTimeout = time.Second
+const reconnectBackoff = time.Second
 
 type onlineConfig struct {
-	Collector struct {
-		ListenAddr string
-	}
-	Transport struct {
-		ProcessorSocket  string
-		ConnectTimeoutMs int
-		WriteTimeoutMs   int
-		ReadTimeoutMs    int
-		ReconnectBackoff int
-		FrameMaxBytes    int
-	}
-	Storage struct {
-		CollectorOutputDir string
-	}
-	LaunchBatching struct {
-		MaxBatchCount       int
-		FlushIntervalMs     int
-		MaxUnsentPerSession int
-	}
-	Enforcement struct {
-		Message string
-	}
+	ListenAddress     string
+	ProcessorSocket   string
+	CaptureDir        string
+	FrameMaxBytes     int
+	LaunchBatchSize   int
+	FlushIntervalMs   int
+	MaxQueuedLaunches int
 }
 
 type projectConfig struct {
@@ -94,19 +82,20 @@ func loadOnlineConfig(path string) (onlineConfig, error) {
 	if project.Collector.ListenAddress == "" || project.Collector.ProcessorSocket == "" {
 		return onlineConfig{}, fmt.Errorf("collector.listen_address and collector.processor_socket are required")
 	}
+	if project.Collector.FrameMaxBytes <= 0 ||
+		project.Collector.LaunchBatchSize <= 0 ||
+		project.Collector.FlushIntervalMs <= 0 ||
+		project.Collector.MaxQueuedLaunches <= 0 {
+		return onlineConfig{}, fmt.Errorf("collector size and timing settings must be positive")
+	}
 	var cfg onlineConfig
-	cfg.Collector.ListenAddr = project.Collector.ListenAddress
-	cfg.Transport.ProcessorSocket = project.Collector.ProcessorSocket
-	cfg.Transport.FrameMaxBytes = project.Collector.FrameMaxBytes
-	cfg.Transport.ConnectTimeoutMs = 1000
-	cfg.Transport.WriteTimeoutMs = 1000
-	cfg.Transport.ReadTimeoutMs = 1000
-	cfg.Transport.ReconnectBackoff = 1000
-	cfg.LaunchBatching.MaxBatchCount = project.Collector.LaunchBatchSize
-	cfg.LaunchBatching.FlushIntervalMs = project.Collector.FlushIntervalMs
-	cfg.LaunchBatching.MaxUnsentPerSession = project.Collector.MaxQueuedLaunches
-	cfg.Storage.CollectorOutputDir = "artifacts/captures"
-	cfg.Enforcement.Message = "GPU-Sentry stopped a suspected mining process"
+	cfg.ListenAddress = project.Collector.ListenAddress
+	cfg.ProcessorSocket = project.Collector.ProcessorSocket
+	cfg.FrameMaxBytes = project.Collector.FrameMaxBytes
+	cfg.LaunchBatchSize = project.Collector.LaunchBatchSize
+	cfg.FlushIntervalMs = project.Collector.FlushIntervalMs
+	cfg.MaxQueuedLaunches = project.Collector.MaxQueuedLaunches
+	cfg.CaptureDir = "artifacts/captures"
 	return cfg, nil
 }
 
@@ -121,7 +110,7 @@ func newOnlineClient(cfg onlineConfig) *onlineClient {
 }
 
 func (c *onlineClient) start() {
-	logf("online processor client starting socket=%s", c.cfg.Transport.ProcessorSocket)
+	logf("online processor client starting socket=%s", c.cfg.ProcessorSocket)
 	go c.run()
 }
 
@@ -142,7 +131,6 @@ func (c *onlineClient) endSession(sessionID string, reason string) {
 	if sessionID == "" {
 		return
 	}
-	dropped := c.dropQueuedSessionMessages(sessionID)
 	message := map[string]any{
 		"type":       "session_end",
 		"session_id": sessionID,
@@ -150,44 +138,14 @@ func (c *onlineClient) endSession(sessionID string, reason string) {
 	}
 	select {
 	case c.sendCh <- message:
-		logf("online session end queued session=%s reason=%s dropped_queued=%d", shortSession(sessionID), reason, dropped)
+		logf("online session end queued session=%s reason=%s", shortSession(sessionID), reason)
 	default:
-		logf("online processor queue full; dropping session_end session=%s dropped_queued=%d", shortSession(sessionID), dropped)
+		logf("online processor queue full; dropping session_end session=%s", shortSession(sessionID))
 	}
-}
-
-func (c *onlineClient) dropQueuedSessionMessages(sessionID string) int {
-	queued := len(c.sendCh)
-	if queued == 0 {
-		return 0
-	}
-	dropped := 0
-	kept := make([]map[string]any, 0, queued)
-	for i := 0; i < queued; i++ {
-		select {
-		case message := <-c.sendCh:
-			if fmt.Sprint(message["session_id"]) == sessionID {
-				dropped++
-				continue
-			}
-			kept = append(kept, message)
-		default:
-			i = queued
-		}
-	}
-	for _, message := range kept {
-		select {
-		case c.sendCh <- message:
-		default:
-			logf("online processor queue full while restoring queued message type=%v session=%v", message["type"], message["session_id"])
-		}
-	}
-	return dropped
 }
 
 func (c *onlineClient) run() {
 	defer close(c.doneCh)
-	backoff := time.Duration(c.cfg.Transport.ReconnectBackoff) * time.Millisecond
 	for {
 		select {
 		case <-c.stopCh:
@@ -196,21 +154,21 @@ func (c *onlineClient) run() {
 		}
 		conn, err := net.DialTimeout(
 			"unix",
-			c.cfg.Transport.ProcessorSocket,
-			time.Duration(c.cfg.Transport.ConnectTimeoutMs)*time.Millisecond,
+			c.cfg.ProcessorSocket,
+			socketTimeout,
 		)
 		if err != nil {
-			logf("online processor connect failed socket=%s error=%v", c.cfg.Transport.ProcessorSocket, err)
-			if !sleepOrDone(backoff, c.stopCh) {
+			logf("online processor connect failed socket=%s error=%v", c.cfg.ProcessorSocket, err)
+			if !sleepOrDone(reconnectBackoff, c.stopCh) {
 				return
 			}
 			continue
 		}
-		logf("online processor connected socket=%s", c.cfg.Transport.ProcessorSocket)
+		logf("online processor connected socket=%s", c.cfg.ProcessorSocket)
 		c.runConn(conn)
 		_ = conn.Close()
-		logf("online processor disconnected; reconnecting after %s", backoff)
-		if !sleepOrDone(backoff, c.stopCh) {
+		logf("online processor disconnected; reconnecting after %s", reconnectBackoff)
+		if !sleepOrDone(reconnectBackoff, c.stopCh) {
 			return
 		}
 	}
@@ -219,11 +177,11 @@ func (c *onlineClient) run() {
 func (c *onlineClient) runConn(conn net.Conn) {
 	errCh := make(chan error, 1)
 	go c.readLoop(conn, errCh)
-	_ = writeJSONFrame(conn, map[string]any{"type": "collector_hello", "version": 1}, c.cfg.Transport.WriteTimeoutMs)
+	_ = writeJSONFrame(conn, map[string]any{"type": "collector_hello", "version": 1}, socketTimeout)
 	for {
 		select {
 		case <-c.stopCh:
-			_ = writeJSONFrame(conn, map[string]any{"type": "collector_shutdown"}, c.cfg.Transport.WriteTimeoutMs)
+			_ = writeJSONFrame(conn, map[string]any{"type": "collector_shutdown"}, socketTimeout)
 			return
 		case err := <-errCh:
 			if err != nil && !errors.Is(err, io.EOF) {
@@ -232,7 +190,7 @@ func (c *onlineClient) runConn(conn net.Conn) {
 			return
 		case message := <-c.sendCh:
 			logProcessorSend(message)
-			if err := writeJSONFrame(conn, message, c.cfg.Transport.WriteTimeoutMs); err != nil {
+			if err := writeJSONFrame(conn, message, socketTimeout); err != nil {
 				logf("online processor write error type=%v session=%v error=%v", message["type"], message["session_id"], err)
 				return
 			}
@@ -242,7 +200,7 @@ func (c *onlineClient) runConn(conn net.Conn) {
 
 func (c *onlineClient) readLoop(conn net.Conn, errCh chan<- error) {
 	for {
-		message, err := readJSONFrame(conn, c.cfg.Transport.FrameMaxBytes, c.cfg.Transport.ReadTimeoutMs)
+		message, err := readJSONFrame(conn, c.cfg.FrameMaxBytes, socketTimeout)
 		if err != nil {
 			errCh <- err
 			return
@@ -271,7 +229,7 @@ func newLaunchBatcher(client *onlineClient, cfg onlineConfig) *launchBatcher {
 		cfg:         cfg,
 		batches:     make(map[string][]map[string]any),
 		batchCounts: make(map[string]int),
-		ticker:      time.NewTicker(time.Duration(cfg.LaunchBatching.FlushIntervalMs) * time.Millisecond),
+		ticker:      time.NewTicker(time.Duration(cfg.FlushIntervalMs) * time.Millisecond),
 		stopCh:      make(chan struct{}),
 	}
 	go b.run()
@@ -282,13 +240,13 @@ func (b *launchBatcher) add(sessionID string, launch map[string]any) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	rows := b.batches[sessionID]
-	if len(rows) >= b.cfg.LaunchBatching.MaxUnsentPerSession {
+	if len(rows) >= b.cfg.MaxQueuedLaunches {
 		logf("online launch queue full session=%s; dropping launch", shortSession(sessionID))
 		return
 	}
 	rows = append(rows, launch)
 	b.batches[sessionID] = rows
-	if len(rows) >= b.cfg.LaunchBatching.MaxBatchCount {
+	if len(rows) >= b.cfg.LaunchBatchSize {
 		b.flushLocked(sessionID)
 	}
 }
@@ -348,9 +306,9 @@ func (b *launchBatcher) flushLocked(sessionID string) {
 	}
 }
 
-func writeJSONFrame(conn net.Conn, message map[string]any, timeoutMs int) error {
-	if timeoutMs > 0 {
-		_ = conn.SetWriteDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
+func writeJSONFrame(conn net.Conn, message map[string]any, timeout time.Duration) error {
+	if timeout > 0 {
+		_ = conn.SetWriteDeadline(time.Now().Add(timeout))
 	}
 	payload, err := json.Marshal(message)
 	if err != nil {
@@ -368,9 +326,9 @@ func writeJSONFrame(conn net.Conn, message map[string]any, timeoutMs int) error 
 	return writer.Flush()
 }
 
-func readJSONFrame(conn net.Conn, maxBytes int, timeoutMs int) (map[string]any, error) {
-	if timeoutMs > 0 {
-		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
+func readJSONFrame(conn net.Conn, maxBytes int, timeout time.Duration) (map[string]any, error) {
+	if timeout > 0 {
+		_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	var hdr [4]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {

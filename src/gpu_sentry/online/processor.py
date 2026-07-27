@@ -48,7 +48,7 @@ from gpu_sentry.model.data import encode_content_ids
 from gpu_sentry.model.metrics import softmax_rows
 from gpu_sentry.model.tokenization import load_sass_tokenizer
 
-from .config import DEFAULT_ONLINE_CONFIG, load_online_config, repo_path
+from .config import DEFAULT_ONLINE_CONFIG, OnlineConfig, load_online_config
 from .framing import FrameError, recv_frame, send_frame
 from .policy import DecisionPolicy, load_policy
 
@@ -76,8 +76,6 @@ class SessionState:
     session_dir: Path
     l0_scheduler: L0WindowScheduler
     policy: DecisionPolicy
-    process_info: dict[str, Any] | None = None
-    launches: list[dict[str, Any]] = field(default_factory=list)
     artifacts: dict[tuple[int, str], KernelArtifact] = field(default_factory=dict)
     artifacts_by_code: dict[int, list[KernelArtifact]] = field(default_factory=dict)
     dropped_unready_launches: int = 0
@@ -94,7 +92,7 @@ class SessionState:
 
 
 class L1Classifier:
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: OnlineConfig):
         self.config = config
         self.available = False
         self.error: str | None = None
@@ -129,19 +127,15 @@ class L1Classifier:
             *content_ids,
             int(self.tokenizer.sep_token_id),
         ]]
-        probabilities: list[list[float]] = []
-        batch_size = int(self.config["l1"].get("batch_size", 1))
+        encoded = self.tokenizer.pad(
+            {"input_ids": rows, "attention_mask": [[1] * len(row) for row in rows]},
+            padding=True,
+            return_tensors="pt",
+        )
+        encoded = {key: value.to(self.device) for key, value in encoded.items()}
         with self.torch.no_grad():
-            for start in range(0, len(rows), batch_size):
-                batch_rows = rows[start : start + batch_size]
-                encoded = self.tokenizer.pad(
-                    {"input_ids": batch_rows, "attention_mask": [[1] * len(row) for row in batch_rows]},
-                    padding=True,
-                    return_tensors="pt",
-                )
-                encoded = {key: value.to(self.device) for key, value in encoded.items()}
-                logits = self.model(**encoded).logits.detach().cpu().numpy()
-                probabilities.extend(softmax_rows(logits))
+            logits = self.model(**encoded).logits.detach().cpu().numpy()
+        probabilities = softmax_rows(logits)
         prediction = self._aggregate(workload, probabilities)
         log(
             "L1 done "
@@ -157,14 +151,14 @@ class L1Classifier:
             import torch
             from transformers import AutoConfig, AutoModelForSequenceClassification
 
-            run_config = load_run_config(repo_path(self.config["l1"]["training_config_path"]))
-            checkpoint = repo_path(self.config["l1"]["checkpoint_path"])
+            run_config = load_run_config(self.config.config_path)
+            checkpoint = self.config.checkpoint_path
             tokenizer_dir = checkpoint if (checkpoint / "tokenizer.json").exists() else run_config.paths.tokenizer_dir
             tokenizer = load_sass_tokenizer(tokenizer_dir)
             model_config = AutoConfig.from_pretrained(checkpoint)
             model_config.reference_compile = False
             model = AutoModelForSequenceClassification.from_pretrained(checkpoint, config=model_config)
-            requested_device = str(self.config["l1"]["device"])
+            requested_device = self.config.device
             if requested_device == "auto":
                 device = "cuda" if torch.cuda.is_available() else "cpu"
             else:
@@ -214,27 +208,27 @@ class L1Classifier:
 
 
 class OnlineProcessor:
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: OnlineConfig):
         self.config = config
-        self.frame_max_bytes = int(config["transport"]["frame_max_bytes"])
-        self.work_dir = repo_path(config["storage"]["processor_work_dir"])
+        self.frame_max_bytes = config.frame_max_bytes
+        self.work_dir = config.work_dir
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        self.l0_config = load_l0_config(repo_path(config["l0"]["config_path"]))
+        self.l0_config = load_l0_config(config.config_path)
         self.tools = find_cuda_tools()
-        self.executor = ThreadPoolExecutor(max_workers=int(config["kernel_analysis"]["workers"]))
+        self.executor = ThreadPoolExecutor(max_workers=config.analysis_workers)
         self.event_executor = ThreadPoolExecutor(max_workers=1)
         self.classifier = L1Classifier(config)
-        self.inference_executor = ThreadPoolExecutor(max_workers=int(config["l1"]["inference_workers"]))
+        self.inference_executor = ThreadPoolExecutor(max_workers=config.inference_workers)
         self.sessions: dict[str, SessionState] = {}
         self.outbox: list[dict[str, Any]] = []
         self.lock = threading.RLock()
         tool_summary = ", ".join(f"{name}={path}" for name, path in sorted(self.tools.items())) or "none"
-        log(f"processor config={config.get('_config_path')} work_dir={self.work_dir}")
+        log(f"processor config={config.config_path} work_dir={self.work_dir}")
         log(f"CUDA tools: {tool_summary}")
-        log(f"inference workers={config['l1']['inference_workers']}")
+        log(f"inference workers={config.inference_workers}")
 
     def serve_forever(self) -> None:
-        sock_path = Path(str(self.config["transport"]["processor_socket"]))
+        sock_path = self.config.processor_socket
         if sock_path.exists():
             sock_path.unlink()
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -253,7 +247,7 @@ class OnlineProcessor:
 
     def _handle_conn(self, conn: socket.socket) -> None:
         with conn:
-            conn.settimeout(int(self.config["transport"]["read_timeout_ms"]) / 1000.0)
+            conn.settimeout(1.0)
             if not self._send_or_close(
                 conn,
                 {
@@ -324,7 +318,7 @@ class OnlineProcessor:
                 if should_log_launch_batch(state.launch_batches_seen):
                     log(
                         f"launch_batch session={short_session(session_id)} "
-                        f"batch={state.launch_batches_seen} count={len(launches)} total_before={len(state.launches)}"
+                        f"batch={state.launch_batches_seen} count={len(launches)}"
                     )
             return self._handle_launches(session_id, launches)
         with self.lock:
@@ -332,8 +326,7 @@ class OnlineProcessor:
             if not state.active and msg_type not in {"collector_shutdown"}:
                 return []
             if msg_type == "process_info":
-                state.process_info = dict(message.get("process_info") or {})
-                info = state.process_info
+                info = dict(message.get("process_info") or {})
                 log(f"process_info session={short_session(session_id)} pid={info.get('pid')} exe={info.get('exe_path')}")
                 return []
             if msg_type == "code_object":
@@ -363,7 +356,7 @@ class OnlineProcessor:
                 session_id,
                 session_dir,
                 L0WindowScheduler(self.l0_config),
-                load_policy(self.config["verdict"]["policy"], self.config["verdict"]),
+                load_policy(self.config.policy, self.config.decision_settings),
             )
             self.sessions[session_id] = state
             log(f"new session={short_session(session_id)} dir={session_dir}")
@@ -548,7 +541,6 @@ class OnlineProcessor:
                         )
                     continue
                 for ready_launch in launches_for_artifact(launch, artifact):
-                    state.launches.append(ready_launch)
                     windows = state.l0_scheduler.add_launch(ready_launch)
                     for window in windows:
                         max_ratio = float(window.features.get("max_bitwise_integer_ratio", 0.0))
@@ -560,12 +552,11 @@ class OnlineProcessor:
                             f"reasons={','.join(window.trigger_reason)}"
                         )
                         ready_windows.append(window)
-        return self._run_windows(session_id, ready_windows)
-
-    def _run_windows(self, session_id: str, windows: list[L0Window], pending: bool = False) -> list[dict[str, Any]]:
-        for window in windows:
-            prefix = "pending window" if pending else "window"
-            log(f"{prefix} ready session={short_session(session_id)} id={window.window_id}; queueing policy score")
+        for window in ready_windows:
+            log(
+                f"window ready session={short_session(session_id)} "
+                f"id={window.window_id}; queueing policy score"
+            )
             self._submit_l1_window(session_id, window)
         return []
 
@@ -738,7 +729,7 @@ class OnlineProcessor:
             "action": action,
             "suspicious": bool(prediction["suspicious"]),
             "reason": prediction["suspicious_reason"],
-            "message": self.config["enforcement"]["message"],
+            "message": "",
             "prediction": prediction,
             "trigger_reason": window.trigger_reason,
             "l0_features": window.features,
@@ -766,7 +757,7 @@ class OnlineProcessor:
             "action": action,
             "suspicious": bool(prediction.get("suspicious", False)),
             "reason": str(prediction.get("suspicious_reason") or "signature_cache"),
-            "message": self.config["enforcement"]["message"],
+            "message": "",
             "prediction": prediction,
             "trigger_reason": window.trigger_reason,
             "l0_features": window.features,
@@ -802,7 +793,7 @@ class OnlineProcessor:
         rendered = render_workload_sass(
             session_dir,
             window.launches,
-            short_kernel_threshold=int(self.config["kernel_analysis"]["short_kernel_threshold"]),
+            short_kernel_threshold=self.config.short_kernel_threshold,
             content_token_budget=self.l0_config.window.content_token_budget,
         )
         token_cost = sass_token_count(rendered["text"])
@@ -894,10 +885,6 @@ def _online_signature_cache_key(window: L0Window) -> str:
     )
 
 
-def launch_for_artifact(launch: dict[str, Any], artifact: KernelArtifact) -> dict[str, Any]:
-    return launches_for_artifact(launch, artifact)[0]
-
-
 def launches_for_artifact(launch: dict[str, Any], artifact: KernelArtifact) -> list[dict[str, Any]]:
     segment_artifacts = artifact.segments or [
         {
@@ -920,12 +907,6 @@ def launches_for_artifact(launch: dict[str, Any], artifact: KernelArtifact) -> l
             ready_launch["captured_kernel_name"] = captured_kernel_name
         ready_launches.append(ready_launch)
     return ready_launches
-
-
-def _read_nonempty(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def mining_termination_message(prediction: dict[str, Any]) -> str:

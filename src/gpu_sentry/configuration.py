@@ -54,6 +54,18 @@ def load_config(path: str | Path = "config.json") -> ProjectConfig:
     policy = raw["decision"].get("policy")
     if not isinstance(policy, str) or ":" not in policy:
         raise ConfigError("decision.policy must use 'module:ClassName' syntax")
+    _required_string(raw["collector"], "listen_address")
+    _required_string(raw["collector"], "processor_socket")
+    for key in (
+        "frame_max_bytes",
+        "launch_batch_size",
+        "flush_interval_ms",
+        "max_queued_launches",
+    ):
+        _positive(raw["collector"], key)
+    _positive(raw["online"], "analysis_workers")
+    _positive(raw["online"], "inference_workers")
+    _required_string(raw["online"], "device")
 
     return ProjectConfig(path=source, **{key: raw[key] for key in expected})
 
@@ -72,3 +84,8 @@ def _probability(section: dict[str, Any], key: str) -> None:
     value = section.get(key)
     if not isinstance(value, (int, float)) or not 0 <= value <= 1:
         raise ConfigError(f"{key} must be in [0, 1]")
+
+
+def _required_string(section: dict[str, Any], key: str) -> None:
+    if not isinstance(section.get(key), str) or not section[key].strip():
+        raise ConfigError(f"{key} must be a non-empty string")

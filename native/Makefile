@@ -6,8 +6,6 @@ PYTHON   := python3
 GO       := go
 SUDO     ?= sudo
 
-DEBUG ?= 1
-
 BUILD ?= build
 DOCKER_BUILD ?= build-ubuntu20
 LIBCUDA_LINK ?= /usr/lib/x86_64-linux-gnu/libcuda.so.1
@@ -23,16 +21,8 @@ GO_DIR := go
 GO_ARCHIVE := $(BUILD)/libgpu_sentry_go.a
 GO_SERVER := $(BUILD)/gpu-sentry-collector
 GO_ENV := GOCACHE=/tmp/gpu-sentry-go-cache GOMODCACHE=/tmp/gpu-sentry-go-modcache PATH=$(HOME)/go/bin:$(PATH)
-CONFIG_STAMP := $(BUILD)/.config-debug-$(DEBUG)
-
-ifeq ($(DEBUG),1)
-CFLAGS += -Wall -Wextra -g -fPIC -DCUHOOK_DEBUG
-else
-CFLAGS += -O2 -Wall -Wextra -g -fPIC
-endif
-
 INCLUDES := -Iinclude -Iinclude/vendor
-CFLAGS += $(INCLUDES)
+CFLAGS := -O2 -Wall -Wextra -g -fPIC $(INCLUDES)
 
 CXXFLAGS = $(CFLAGS) -std=c++17
 
@@ -44,10 +34,6 @@ all: $(TARGET) $(GO_SERVER)
 
 $(BUILD):
 	mkdir -p $(BUILD)
-
-$(CONFIG_STAMP): | $(BUILD)
-	rm -f $(BUILD)/.config-debug-*
-	touch $@
 
 include/cuda_symbols.def: $(REAL_LIBCUDA) hooked_symbols scripts/gen_trampoline_symbols.py
 	$(PYTHON) scripts/gen_trampoline_symbols.py $(REAL_LIBCUDA)
@@ -66,22 +52,22 @@ $(BUILD)/libcuda_blob.o: $(REAL_LIBCUDA) | $(BUILD)
 	cd "$(dir $(REAL_LIBCUDA))" && \
 		$(LD) -r -b binary "$(notdir $(REAL_LIBCUDA))" -o "$(abspath $@)"
 
-$(BUILD)/loader.o: src/loader.c include/cuda_symbols.def $(CONFIG_STAMP) | $(BUILD)
+$(BUILD)/loader.o: src/loader.c include/cuda_symbols.def | $(BUILD)
 	$(CC) $(CFLAGS) -c src/loader.c -o $@
 
-$(BUILD)/trampolines.o: src/trampolines.S include/cuda_trampolines.inc $(CONFIG_STAMP) | $(BUILD)
+$(BUILD)/trampolines.o: src/trampolines.S include/cuda_trampolines.inc | $(BUILD)
 	$(CC) $(CFLAGS) -c src/trampolines.S -o $@
 
-$(BUILD)/hook.o: src/hook.cc include/cuda_symbols.def include/code_registry.h $(CONFIG_STAMP) | $(BUILD)
+$(BUILD)/hook.o: src/hook.cc include/cuda_symbols.def include/code_registry.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/hook.cc -o $@
 
-$(BUILD)/code_registry.o: src/code_registry.cc include/code_registry.h include/telemetry.h $(CONFIG_STAMP) | $(BUILD)
+$(BUILD)/code_registry.o: src/code_registry.cc include/code_registry.h include/telemetry.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/code_registry.cc -o $@
 
-$(BUILD)/telemetry.o: src/telemetry.cc include/telemetry.h $(CONFIG_STAMP) | $(BUILD)
+$(BUILD)/telemetry.o: src/telemetry.cc include/telemetry.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/telemetry.cc -o $@
 
-$(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h $(CONFIG_STAMP) | $(BUILD)
+$(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/telemetry_bridge.cc -o $@
 
 $(GO_ARCHIVE): $(GO_DIR)/client/main.go $(GO_DIR)/go.mod $(GO_DIR)/go.sum $(GO_DIR)/protocol/telemetry.pb.go include/telemetry.h | $(BUILD)
