@@ -1,0 +1,12 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.12.0+cu126
+transformers>=4.48,<5
+tokenizers>=0.21,<0.22
+datasets
+accelerate
+huggingface_hub
+scikit-learn
+joblib
+numpy
+fsspec<=2026.2.0
+tqdm

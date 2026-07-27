@@ -1,0 +1,7 @@
+build
+build-*
+
+.driver-backups/
+
+include/cuda_symbols.def
+include/cuda_trampolines.inc

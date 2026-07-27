@@ -1,0 +1,14 @@
+cuGetProcAddress
+cuGetProcAddress_v2
+cuLaunchKernel
+cuLaunchKernelEx
+cuLaunchCooperativeKernel
+cuModuleLoad
+cuModuleLoadData
+cuModuleLoadDataEx
+cuModuleLoadFatBinary
+cuLibraryLoadData
+cuLibraryLoadFromFile
+cuModuleGetFunction
+cuLibraryGetKernel
+cuLibraryGetModule

@@ -1,0 +1,50 @@
+{
+  "model": {
+    "max_sequence_length": 8192,
+    "hidden_size": 384,
+    "layers": 8,
+    "attention_heads": 6,
+    "intermediate_size": 576,
+    "local_attention": 128,
+    "attention_dropout": 0.05,
+    "embedding_dropout": 0.05,
+    "mlp_dropout": 0.05,
+    "classifier_dropout": 0.1
+  },
+  "training": {
+    "seed": 1337,
+    "mlm_epochs": 16,
+    "classifier_epochs": 20,
+    "mlm_learning_rate": 0.0005,
+    "classifier_learning_rate": 0.00005,
+    "gradient_accumulation_steps": 8,
+    "warmup_ratio": 0.06,
+    "mlm_weight_decay": 0.01,
+    "classifier_weight_decay": 0.02
+  },
+  "windowing": {
+    "training_content_tokens": 8190,
+    "deployment_content_tokens": 4096,
+    "short_kernel_instructions": 256
+  },
+  "decision": {
+    "policy": "gpu_sentry.online.policy:RollingMeanMaxPolicy",
+    "history_windows": 16,
+    "mean_mining_probability": 0.5,
+    "max_mining_probability": 0.9
+  },
+  "collector": {
+    "listen_address": "127.0.0.1:59400",
+    "processor_socket": "/tmp/gpu-sentry.sock",
+    "frame_max_bytes": 10485760,
+    "launch_batch_size": 128,
+    "flush_interval_ms": 10,
+    "max_queued_launches": 8192
+  },
+  "online": {
+    "analysis_workers": 2,
+    "inference_workers": 1,
+    "batch_size": 1,
+    "device": "auto"
+  }
+}

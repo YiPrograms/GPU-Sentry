@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package gpu_sentry.telemetry.v1;
+
+option go_package = "gpu-sentry/native/protocol;protocol";
+
+message Envelope {
+  string session_id = 1;
+  uint64 sequence = 2;
+  uint64 timestamp_ns = 3;
+  uint32 pid = 4;
+  uint32 tid = 5;
+
+  oneof event {
+    ProcessInfoEvent process_info = 10;
+    ClientHello client_hello = 11;
+    CodeEvent code = 12;
+    KernelLaunchEvent kernel_launch = 13;
+    StatsEvent stats = 14;
+  }
+}
+
+message ProcessInfoEvent {
+  uint32 ppid = 1;
+  uint32 uid = 2;
+  uint32 gid = 3;
+  string hostname = 4;
+  string exe_path = 5;
+  string cwd = 6;
+  repeated string argv = 7;
+  uint64 process_start_time_ns = 8;
+  string hook_version = 9;
+  string client_version = 10;
+}
+
+message ClientHello {
+  string session_id = 1;
+  uint32 pid = 2;
+}
+
+message CodeEvent {
+  uint32 code_id = 1;
+  uint32 code_type = 2;
+  bytes sha256 = 3;
+  bytes data = 4;
+}
+
+message KernelLaunchEvent {
+  string kernel_name = 2;
+  uint32 code_id = 3;
+  uint32 grid_dim_x = 4;
+  uint32 grid_dim_y = 5;
+  uint32 grid_dim_z = 6;
+  uint32 block_dim_x = 7;
+  uint32 block_dim_y = 8;
+  uint32 block_dim_z = 9;
+  uint32 shared_mem_bytes = 10;
+  uint64 stream = 11;
+  string device_pci_bus_id = 12;
+}
+
+message StatsEvent {
+  uint64 dropped_events = 1;
+  uint64 dropped_bytes = 2;
+  uint64 queued_events = 3;
+}
+
+message ServerEnvelope {
+  string session_id = 1;
+  uint64 timestamp_ns = 2;
+
+  oneof command {
+    ControlCommand control = 10;
+  }
+}
+
+message ControlCommand {
+  ControlAction action = 1;
+  string message = 2;
+  string reason = 3;
+  double mining_probability = 4;
+  string window_id = 5;
+}
+
+enum ControlAction {
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  CONTROL_ACTION_LOG = 1;
+  CONTROL_ACTION_TERMINATE = 2;
+}

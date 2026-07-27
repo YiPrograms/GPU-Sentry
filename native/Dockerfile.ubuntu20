@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+
+FROM ubuntu:20.04 AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG GO_VERSION=1.23.12
+ARG DEBUG=0
+ARG TARGETARCH=amd64
+ARG REAL_LIBCUDA
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      binutils \
+      build-essential \
+      ca-certificates \
+      curl \
+      make \
+      python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) goarch=amd64 ;; \
+      arm64) goarch=arm64 ;; \
+      *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz" -o /tmp/go.tgz; \
+    tar -C /usr/local -xzf /tmp/go.tgz; \
+    rm /tmp/go.tgz
+
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
+
+WORKDIR /src
+COPY . .
+COPY ${REAL_LIBCUDA} /src/libcuda.so.1.real
+
+RUN make clean && \
+    make "DEBUG=${DEBUG}" \
+      BUILD=build-ubuntu20 \
+      REAL_LIBCUDA=libcuda.so.1.real \
+      all
+
+RUN set -eux; \
+    { \
+      echo "== libcuda.so.1.real =="; \
+      readelf --version-info libcuda.so.1.real; \
+      echo; \
+      echo "== build-ubuntu20/gpu-sentry-collector =="; \
+      readelf --version-info build-ubuntu20/gpu-sentry-collector; \
+      echo; \
+      echo "== build-ubuntu20/libcuda.so.1 =="; \
+      readelf --version-info build-ubuntu20/libcuda.so.1; \
+    } > build-ubuntu20/glibc-versions.txt; \
+    if grep -Eq 'GLIBC_2\.(3[2-9]|[4-9][0-9])' build-ubuntu20/glibc-versions.txt; then \
+      echo "artifact requires GLIBC_2.32 or newer" >&2; \
+      grep -E 'GLIBC_2\.(3[2-9]|[4-9][0-9])' \
+        build-ubuntu20/glibc-versions.txt >&2; \
+      exit 1; \
+    fi
+
+FROM scratch AS artifacts
+
+COPY --from=builder /src/build-ubuntu20/gpu-sentry-collector /gpu-sentry-collector
+COPY --from=builder /src/build-ubuntu20/libcuda.so.1 /libcuda.so.1
+COPY --from=builder /src/build-ubuntu20/libgpu_sentry_go.a /libgpu_sentry_go.a
+COPY --from=builder /src/build-ubuntu20/libgpu_sentry_go.h /libgpu_sentry_go.h
+COPY --from=builder /src/build-ubuntu20/glibc-versions.txt /glibc-versions.txt

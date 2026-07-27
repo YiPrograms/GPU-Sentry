@@ -1,0 +1,3 @@
+# Go test/coverage artifacts.
+*.test
+coverage.out

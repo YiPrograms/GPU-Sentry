@@ -1,0 +1,6 @@
+build
+build-*
+go/*.test
+go/coverage.out
+**/*.test
+coverage.out

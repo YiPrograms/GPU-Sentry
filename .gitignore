@@ -1,0 +1,17 @@
+artifacts/
+build/
+native/build/
+native/build-*/
+native/.driver-backups/
+native/include/cuda_symbols.def
+native/include/cuda_trampolines.inc
+workloads/synthetic/binaries/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+*.swp
