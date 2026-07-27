@@ -6,4 +6,4 @@
 #include "cuda_symbols.def"
 #undef CUDA_SYMBOL
 
-static void *get_hooked_function(const char *symbol);
+static void *get_hooked_function(const char *symbol, cuuint64_t flags);

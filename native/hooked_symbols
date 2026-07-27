@@ -1,8 +1,11 @@
 cuGetProcAddress
 cuGetProcAddress_v2
 cuLaunchKernel
+cuLaunchKernel_ptsz
 cuLaunchKernelEx
+cuLaunchKernelEx_ptsz
 cuLaunchCooperativeKernel
+cuLaunchCooperativeKernel_ptsz
 cuModuleLoad
 cuModuleLoadData
 cuModuleLoadDataEx
@@ -11,5 +14,6 @@ cuLibraryLoadData
 cuLibraryLoadFromFile
 cuModuleGetFunction
 cuLibraryGetKernel
+cuLibraryEnumerateKernels
 cuLibraryGetModule
 cuKernelGetFunction
