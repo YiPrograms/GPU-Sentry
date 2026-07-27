@@ -227,28 +227,44 @@ The `decision.policy` setting uses `module:ClassName` syntax:
 }
 ```
 
-A policy accepts the decision settings and implements
-`update(mining_probability)`:
+A policy accepts the decision settings and implements `decide(observation)`.
+Each observation contains the model output, window features, process
+information, signature-cache metadata, and the kernel launches in the
+classified window. Kernel launches include the kernel name, code ID,
+grid/block dimensions, stream, timestamps, and L0 kernel metadata.
 
 ```python
 from typing import Any, Mapping
 
-from gpu_sentry.online.policy import Decision
+from gpu_sentry.online.policy import Decision, PolicyInput
 
 
-class ConsecutivePolicy:
+class BitwisePolicy:
     def __init__(self, settings: Mapping[str, Any]):
-        self.required = int(settings["consecutive_windows"])
-        self.threshold = float(settings["mining_probability"])
-        self.count = 0
+        self.probability = float(settings["mining_probability"])
+        self.bitwise_ratio = float(settings["bitwise_integer_ratio"])
 
-    def update(self, mining_probability: float) -> Decision:
-        self.count = self.count + 1 if mining_probability >= self.threshold else 0
-        suspicious = self.count >= self.required
+    def decide(self, observation: PolicyInput) -> Decision:
+        ratio = float(
+            observation.window_features.get("max_bitwise_integer_ratio", 0.0)
+        )
+        kernel_names = {
+            str(launch.get("kernel_name"))
+            for launch in observation.kernel_launches
+        }
+        suspicious = (
+            observation.mining_probability >= self.probability
+            and ratio >= self.bitwise_ratio
+        )
         return Decision(
             suspicious=suspicious,
-            reason="consecutive_windows" if suspicious else "below_threshold",
-            details={"consecutive_windows": self.count},
+            reason="mining_and_bitwise_thresholds" if suspicious else "below_threshold",
+            details={
+                "policy": type(self).__name__,
+                "mining_probability": observation.mining_probability,
+                "max_bitwise_integer_ratio": ratio,
+                "kernel_names": sorted(kernel_names),
+            },
         )
 ```
 
@@ -256,13 +272,15 @@ Save the class in an importable module and reference it in `config.json`:
 
 ```json
 "decision": {
-  "policy": "gpu_sentry.online.custom_policy:ConsecutivePolicy",
-  "consecutive_windows": 3,
-  "mining_probability": 0.9
+  "policy": "gpu_sentry.online.custom_policy:BitwisePolicy",
+  "mining_probability": 0.9,
+  "bitwise_integer_ratio": 0.7
 }
 ```
 
-GPU-Sentry creates one policy instance for each CUDA process.
+GPU-Sentry creates one policy instance for each CUDA process and delivers
+observations in window order. A policy may be stateless or retain any state it
+needs; GPU-Sentry does not impose a history strategy.
 
 ## Capturing Workloads
 

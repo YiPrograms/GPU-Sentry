@@ -35,6 +35,16 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.work_dir, root / "artifacts/online")
         self.assertEqual(config.checkpoint_path, (root / "models/detector").resolve())
 
+    def test_custom_policy_defines_its_own_settings(self) -> None:
+        self.raw["decision"] = {
+            "policy": "custom_policy:ProcessAllowlistPolicy",
+            "allowed_executables": ["/usr/bin/python"],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            config = load_config(self.write_config(Path(directory)))
+
+        self.assertEqual(config.decision["allowed_executables"], ["/usr/bin/python"])
+
 
 if __name__ == "__main__":
     unittest.main()

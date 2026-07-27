@@ -50,7 +50,7 @@ from gpu_sentry.model.tokenization import load_sass_tokenizer
 
 from .config import DEFAULT_ONLINE_CONFIG, OnlineConfig, load_online_config
 from .framing import FrameError, recv_frame, send_frame
-from .policy import DecisionPolicy, load_policy
+from .policy import DecisionPolicy, PolicyInput, load_policy
 
 ANSI_BOLD_CYAN = "\033[1;36m"
 ANSI_BOLD_RED = "\033[1;31m"
@@ -77,6 +77,7 @@ class SessionState:
     l0_scheduler: L0WindowScheduler
     policy: DecisionPolicy
     analysis_lock: threading.Lock = field(default_factory=threading.Lock)
+    process_info: dict[str, Any] = field(default_factory=dict)
     artifacts: dict[tuple[int, str], KernelArtifact] = field(default_factory=dict)
     artifacts_by_code: dict[int, list[KernelArtifact]] = field(default_factory=dict)
     dropped_unready_launches: int = 0
@@ -328,6 +329,7 @@ class OnlineProcessor:
                 return []
             if msg_type == "process_info":
                 info = dict(message.get("process_info") or {})
+                state.process_info = info
                 log(f"process_info session={short_session(session_id)} pid={info.get('pid')} exe={info.get('exe_path')}")
                 return []
             if msg_type == "code_object":
@@ -726,6 +728,7 @@ class OnlineProcessor:
             "prediction": prediction,
             "trigger_reason": window.trigger_reason,
             "l0_features": window.features,
+            "_policy_kernel_launches": window.launches,
             "signature_cache_hit": False,
             "signature_source_window_id": window.features.get("signature_source_window_id"),
         }
@@ -749,6 +752,7 @@ class OnlineProcessor:
             "prediction": prediction,
             "trigger_reason": window.trigger_reason,
             "l0_features": window.features,
+            "_policy_kernel_launches": window.launches,
             "signature_cache_hit": True,
             "signature_source_window_id": window.features.get("signature_source_window_id"),
         }
@@ -756,7 +760,21 @@ class OnlineProcessor:
     def _apply_online_verdict_policy(self, state: SessionState, verdict: dict[str, Any]) -> None:
         prediction = dict(verdict["prediction"])
         score = float(prediction.get("mining_probability_mean", prediction.get("mining_probability_max", 0.0)))
-        decision = state.policy.update(score)
+        observation = PolicyInput(
+            session_id=state.session_id,
+            window_id=str(verdict.get("window_id") or ""),
+            mining_probability=score,
+            prediction=dict(prediction),
+            window_features=dict(verdict.get("l0_features") or {}),
+            kernel_launches=tuple(
+                dict(launch)
+                for launch in verdict.pop("_policy_kernel_launches", ())
+            ),
+            trigger_reason=tuple(verdict.get("trigger_reason") or ()),
+            process_info=dict(state.process_info),
+            signature_cache_hit=bool(verdict.get("signature_cache_hit")),
+        )
+        decision = state.policy.decide(observation)
         prediction.update(
             {
                 "decision": decision.details,

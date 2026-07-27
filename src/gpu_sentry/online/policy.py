@@ -13,8 +13,21 @@ class Decision:
     details: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class PolicyInput:
+    session_id: str
+    window_id: str
+    mining_probability: float
+    prediction: Mapping[str, Any]
+    window_features: Mapping[str, Any]
+    kernel_launches: tuple[Mapping[str, Any], ...]
+    trigger_reason: tuple[str, ...]
+    process_info: Mapping[str, Any]
+    signature_cache_hit: bool
+
+
 class DecisionPolicy(Protocol):
-    def update(self, mining_probability: float) -> Decision: ...
+    def decide(self, observation: PolicyInput) -> Decision: ...
 
 
 class RollingMeanMaxPolicy:
@@ -25,8 +38,8 @@ class RollingMeanMaxPolicy:
         self.mean_threshold = float(settings["mean_mining_probability"])
         self.max_threshold = float(settings["max_mining_probability"])
 
-    def update(self, mining_probability: float) -> Decision:
-        self.scores.append(float(mining_probability))
+    def decide(self, observation: PolicyInput) -> Decision:
+        self.scores.append(observation.mining_probability)
         mean = sum(self.scores) / len(self.scores)
         maximum = max(self.scores)
         suspicious = mean >= self.mean_threshold and maximum >= self.max_threshold
@@ -52,6 +65,6 @@ def load_policy(path: str, settings: Mapping[str, Any]) -> DecisionPolicy:
 
     policy_class = getattr(importlib.import_module(module_name), class_name)
     policy = policy_class(settings)
-    if not callable(getattr(policy, "update", None)):
-        raise TypeError(f"{path} must provide update(mining_probability)")
+    if not callable(getattr(policy, "decide", None)):
+        raise TypeError(f"{path} must provide decide(observation)")
     return policy

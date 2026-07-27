@@ -48,12 +48,13 @@ def load_config(path: str | Path = "config.json") -> ProjectConfig:
         raise ConfigError("training_content_tokens exceeds the model content window")
     if raw["windowing"]["deployment_content_tokens"] > raw["model"]["max_sequence_length"] - 2:
         raise ConfigError("deployment_content_tokens exceeds the model content window")
-    _probability(raw["decision"], "mean_mining_probability")
-    _probability(raw["decision"], "max_mining_probability")
-    _positive(raw["decision"], "history_windows")
     policy = raw["decision"].get("policy")
     if not isinstance(policy, str) or ":" not in policy:
         raise ConfigError("decision.policy must use 'module:ClassName' syntax")
+    if policy == "gpu_sentry.online.policy:RollingMeanMaxPolicy":
+        _probability(raw["decision"], "mean_mining_probability")
+        _probability(raw["decision"], "max_mining_probability")
+        _positive(raw["decision"], "history_windows")
     _required_string(raw["collector"], "listen_address")
     _required_string(raw["collector"], "processor_socket")
     for key in (
