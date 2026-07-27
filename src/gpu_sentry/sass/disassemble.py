@@ -57,8 +57,7 @@ def disassemble_code_objects(
     tools: dict[str, Path] | None = None,
 ) -> dict[str, Any]:
     tools = tools or find_cuda_tools()
-    report: dict[str, Any] = {"code_objects": [], "deduplicated_code_objects": 0}
-    by_sha: dict[str, dict[str, Any]] = {}
+    report: dict[str, Any] = {"code_objects": []}
 
     for code_id in sorted(code_map, key=_code_id_sort_key):
         entry = code_map[code_id]
@@ -77,15 +76,6 @@ def disassemble_code_objects(
         sha = str(entry.get("sha256") or "")
         if sha:
             item["sha256"] = sha
-            prior = by_sha.get(sha)
-            if prior and prior.get("status") == "ok":
-                item["status"] = "ok"
-                item["deduplicated_from_code_id"] = prior["code_id"]
-                item["disassembly_output"] = prior["disassembly_output"]
-                item["tool"] = prior.get("tool")
-                report["deduplicated_code_objects"] += 1
-                report["code_objects"].append(item)
-                continue
 
         if fmt == "ptx":
             item["status"] = "ptx_only"
@@ -117,8 +107,6 @@ def disassemble_code_objects(
             item["status"] = "error"
             item["error"] = " | ".join(errors)
 
-        if sha and item.get("status") == "ok":
-            by_sha[sha] = item
         report["code_objects"].append(item)
 
     write_extraction_report(workload_dir, report)

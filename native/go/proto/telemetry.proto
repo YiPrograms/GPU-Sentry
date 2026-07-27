@@ -39,15 +39,14 @@ message ClientHello {
 }
 
 message CodeEvent {
-  uint32 code_id = 1;
+  fixed64 code_id = 1;
   uint32 code_type = 2;
-  bytes sha256 = 3;
-  bytes data = 4;
+  bytes data = 3;
 }
 
 message KernelLaunchEvent {
   string kernel_name = 2;
-  uint32 code_id = 3;
+  optional fixed64 code_id = 3;
   uint32 grid_dim_x = 4;
   uint32 grid_dim_y = 5;
   uint32 grid_dim_z = 6;

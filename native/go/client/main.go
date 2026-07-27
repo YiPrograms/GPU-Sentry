@@ -24,7 +24,7 @@ import (
 	"time"
 	"unsafe"
 
-	"gpu-sentry/native/internal/codeindex"
+	"gpu-sentry/native/internal/codeid"
 	"gpu-sentry/native/protocol"
 
 	"google.golang.org/protobuf/proto"
@@ -48,7 +48,6 @@ type clientConfig struct {
 	processInfo        *protocol.ProcessInfoEvent
 	pid                uint32
 	processInfoWasSent bool
-	codeIndex          *codeindex.Index
 }
 
 //export sg_go_start
@@ -85,13 +84,21 @@ func sg_go_stop() {
 
 func main() {}
 
+//export sg_code_id
+func sg_code_id(data unsafe.Pointer, size C.uint64_t) C.uint64_t {
+	if data == nil || size == 0 {
+		return 0
+	}
+	bytes := unsafe.Slice((*byte)(data), int(size))
+	return C.uint64_t(codeid.FromBytes(bytes))
+}
+
 func loadConfig(raw *C.SGClientConfig) clientConfig {
 	cfg := clientConfig{
 		serverAddr:       "0.0.0.0:59400",
 		batchSize:        128,
 		reconnectBackoff: time.Second,
 		hookVersion:      "unknown",
-		codeIndex:        codeindex.New(),
 	}
 	if raw != nil {
 		if raw.server_addr != nil {
@@ -204,7 +211,7 @@ func drainLoop(conn net.Conn, cfg *clientConfig, stop <-chan struct{}) error {
 
 		events := unsafe.Slice((*C.SGEvent)(buf), int(n))
 		for i := range events {
-			env := convertEvent(&events[i], cfg.sessionID, cfg.codeIndex)
+			env := convertEvent(&events[i], cfg.sessionID)
 			if env == nil {
 				continue
 			}
@@ -217,7 +224,7 @@ func drainLoop(conn net.Conn, cfg *clientConfig, stop <-chan struct{}) error {
 	}
 }
 
-func convertEvent(ev *C.SGEvent, sessionID string, codeIndex *codeindex.Index) *protocol.Envelope {
+func convertEvent(ev *C.SGEvent, sessionID string) *protocol.Envelope {
 	env := &protocol.Envelope{
 		SessionId:   sessionID,
 		Sequence:    uint64(ev.sequence),
@@ -229,24 +236,14 @@ func convertEvent(ev *C.SGEvent, sessionID string, codeIndex *codeindex.Index) *
 	switch uint32(ev.kind) {
 	case C.SG_EVENT_CODE:
 		data := C.GoBytes(unsafe.Pointer(ev.code.data), C.int(ev.code.data_size))
-		sum, duplicate := codeIndex.Register(
-			uint32(ev.code.code_id),
-			uint32(ev.code.code_type),
-			data,
-		)
-		if duplicate {
-			return nil
-		}
 		env.Event = &protocol.Envelope_Code{Code: &protocol.CodeEvent{
-			CodeId:   uint32(ev.code.code_id),
+			CodeId:   uint64(ev.code.code_id),
 			CodeType: uint32(ev.code.code_type),
-			Sha256:   sum[:],
 			Data:     data,
 		}}
 	case C.SG_EVENT_KERNEL_LAUNCH:
-		env.Event = &protocol.Envelope_KernelLaunch{KernelLaunch: &protocol.KernelLaunchEvent{
+		launch := &protocol.KernelLaunchEvent{
 			KernelName:     cStringFromArray(unsafe.Pointer(&ev.launch.kernel_name[0])),
-			CodeId:         codeIndex.Canonical(uint32(ev.launch.code_id)),
 			GridDimX:       uint32(ev.launch.grid_dim_x),
 			GridDimY:       uint32(ev.launch.grid_dim_y),
 			GridDimZ:       uint32(ev.launch.grid_dim_z),
@@ -256,7 +253,11 @@ func convertEvent(ev *C.SGEvent, sessionID string, codeIndex *codeindex.Index) *
 			SharedMemBytes: uint32(ev.launch.shared_mem_bytes),
 			Stream:         uint64(ev.launch.stream_handle),
 			DevicePciBusId: cStringFromArray(unsafe.Pointer(&ev.launch.device_pci_bus_id[0])),
-		}}
+		}
+		if ev.launch.code_id_found != 0 {
+			launch.CodeId = proto.Uint64(uint64(ev.launch.code_id))
+		}
+		env.Event = &protocol.Envelope_KernelLaunch{KernelLaunch: launch}
 	default:
 		return nil
 	}

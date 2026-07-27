@@ -11,8 +11,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <utility>
-#include <vector>
+#include <unordered_set>
 
 #include "debug.h"
 #include "telemetry.h"
@@ -41,7 +40,8 @@ struct FatbinHeader {
 
 struct KernelRecord {
   std::string name;
-  uint32_t code_id;
+  uint64_t code_id;
+  bool code_id_found;
 };
 
 struct CodeImage {
@@ -51,19 +51,28 @@ struct CodeImage {
 };
 
 std::mutex registry_mutex;
-std::vector<void *> code_handles;
-std::unordered_map<void *, uint32_t> code_id_by_handle;
+std::unordered_map<void *, uint64_t> code_id_by_handle;
 std::unordered_map<void *, void *> module_to_library_map;
 std::unordered_map<void *, KernelRecord> kernel_map;
-std::unordered_map<std::string, uint32_t> code_id_by_kernel_name;
+std::unordered_map<std::string, uint64_t> code_id_by_kernel_name;
+std::unordered_set<uint64_t> captured_code_ids;
 
-void send_code(const void *code, size_t size, uint32_t code_type,
-               uint32_t code_id) {
-  if (code == nullptr || size == 0) return;
+uint64_t capture_code(const void *code, size_t size, uint32_t code_type) {
+  if (code == nullptr || size == 0) return 0;
 
-  DEBUG("Captured code (type %u, id %u, size %zu bytes)",
-        code_type, code_id, size);
-  sg_enqueue_code(code_id, code_type, code, size);
+  const uint64_t code_id = sg_code_id(const_cast<void *>(code), size);
+  bool first_capture;
+  {
+    std::lock_guard<std::mutex> lock(registry_mutex);
+    first_capture = captured_code_ids.insert(code_id).second;
+  }
+
+  if (first_capture) {
+    DEBUG("Captured code (type %u, id %016llx, size %zu bytes)", code_type,
+          static_cast<unsigned long long>(code_id), size);
+    sg_enqueue_code(code_id, code_type, code, size);
+  }
+  return code_id;
 }
 
 CodeImage load_fatbin_header(const FatbinHeader *fatbin) {
@@ -115,35 +124,18 @@ CodeImage load_ptx(const void *code) {
   return CodeImage{ptx_code, size, CODE_TYPE_PTX};
 }
 
-uint32_t register_code_handle(void *owner_handle) {
+void register_code_handle(void *owner_handle, uint64_t code_id) {
   std::lock_guard<std::mutex> lock(registry_mutex);
-
-  auto it = code_id_by_handle.find(owner_handle);
-  if (it != code_id_by_handle.end()) {
-    DEBUG("code owner %p -> code ID %u already registered",
-          owner_handle, it->second);
-    return it->second;
-  }
-
-  code_handles.push_back(owner_handle);
-  const uint32_t code_id = static_cast<uint32_t>(code_handles.size() - 1);
   code_id_by_handle[owner_handle] = code_id;
-
-  DEBUG("code owner %p -> code ID %u", owner_handle, code_id);
-
-  return code_id;
-}
-
-uint32_t next_code_id_locked() {
-  code_handles.push_back(nullptr);
-  return static_cast<uint32_t>(code_handles.size() - 1);
+  DEBUG("code owner %p -> code ID %016llx", owner_handle,
+        static_cast<unsigned long long>(code_id));
 }
 
 bool range_fits(size_t offset, size_t count, size_t item_size, size_t size) {
   return offset <= size && item_size != 0 && count <= (size - offset) / item_size;
 }
 
-void index_cubin_symbols(const void *code, size_t size, uint32_t code_id) {
+void index_cubin_symbols(const void *code, size_t size, uint64_t code_id) {
   if (size < sizeof(Elf64_Ehdr)) return;
 
   const auto *bytes = static_cast<const unsigned char *>(code);
@@ -191,8 +183,8 @@ void index_cubin_symbols(const void *code, size_t size, uint32_t code_id) {
   }
 }
 
-uint32_t get_code_id_locked(void *owner_handle) {
-  if (owner_handle == nullptr) return UINT32_MAX;
+bool get_code_id_locked(void *owner_handle, uint64_t *code_id) {
+  if (owner_handle == nullptr || code_id == nullptr) return false;
 
   auto lib_it = module_to_library_map.find(owner_handle);
   if (lib_it != module_to_library_map.end()) {
@@ -200,9 +192,10 @@ uint32_t get_code_id_locked(void *owner_handle) {
   }
 
   auto id_it = code_id_by_handle.find(owner_handle);
-  if (id_it == code_id_by_handle.end()) return UINT32_MAX;
+  if (id_it == code_id_by_handle.end()) return false;
 
-  return id_it->second;
+  *code_id = id_it->second;
+  return true;
 }
 
 }  // namespace
@@ -210,7 +203,6 @@ uint32_t get_code_id_locked(void *owner_handle) {
 void load_code(const void *code, void *owner_handle, bool is_path) {
   if (code == nullptr || owner_handle == nullptr) return;
 
-  const uint32_t code_id = register_code_handle(owner_handle);
   const void *mapped_code = code;
   size_t file_size = 0;
 
@@ -263,7 +255,10 @@ void load_code(const void *code, void *owner_handle, bool is_path) {
 
   DEBUG("Loaded code image of type %u, size %zu bytes", image.type, image.size);
 
-  send_code(image.code, image.size, image.type, code_id);
+  if (image.code != nullptr && image.size != 0) {
+    const uint64_t code_id = capture_code(image.code, image.size, image.type);
+    register_code_handle(owner_handle, code_id);
+  }
 
   if (is_path) {
     munmap(const_cast<void *>(mapped_code), file_size);
@@ -273,15 +268,14 @@ void load_code(const void *code, void *owner_handle, bool is_path) {
 void capture_cubin(const void *code, size_t size) {
   if (code == nullptr || size == 0) return;
 
-  uint32_t code_id;
+  const uint64_t code_id = capture_code(code, size, CODE_TYPE_CUBIN);
   {
     std::lock_guard<std::mutex> lock(registry_mutex);
-    code_id = next_code_id_locked();
     index_cubin_symbols(code, size, code_id);
   }
 
-  DEBUG("CUPTI captured cubin (id %u, size %zu bytes)", code_id, size);
-  send_code(code, size, CODE_TYPE_CUBIN, code_id);
+  DEBUG("CUPTI captured cubin (id %016llx, size %zu bytes)",
+        static_cast<unsigned long long>(code_id), size);
 }
 
 void map_module_to_library(void *module_handle, void *library_handle) {
@@ -298,22 +292,26 @@ void register_kernel(void *kernel_handle, void *owner_handle,
   if (kernel_handle == nullptr || name == nullptr) return;
 
   std::lock_guard<std::mutex> lock(registry_mutex);
-  uint32_t code_id = get_code_id_locked(owner_handle);
+  uint64_t code_id = 0;
+  bool code_id_found = get_code_id_locked(owner_handle, &code_id);
 
-  if (code_id == UINT32_MAX) {
+  if (!code_id_found) {
     auto it = code_id_by_kernel_name.find(name);
     if (it != code_id_by_kernel_name.end()) {
       code_id = it->second;
+      code_id_found = true;
     }
   }
 
-  if (code_id == UINT32_MAX) {
+  if (!code_id_found) {
     DEBUG("owner %p -> code ID <not found> for kernel %s", owner_handle, name);
   }
 
-  kernel_map[kernel_handle] = KernelRecord{std::string(name), code_id};
+  kernel_map[kernel_handle] =
+      KernelRecord{std::string(name), code_id, code_id_found};
 
-  DEBUG("kernel %p -> name %s, code ID %u", kernel_handle, name, code_id);
+  DEBUG("kernel %p -> name %s, code ID %016llx", kernel_handle, name,
+        static_cast<unsigned long long>(code_id));
 }
 
 void copy_kernel_info(void *kernel_handle, void *source_handle) {
@@ -328,18 +326,20 @@ void copy_kernel_info(void *kernel_handle, void *source_handle) {
 
   const KernelRecord record = it->second;
   kernel_map[kernel_handle] = record;
-  DEBUG("kernel %p -> kernel %p, name %s, code ID %u", kernel_handle,
-        source_handle, record.name.c_str(), record.code_id);
+  DEBUG("kernel %p -> kernel %p, name %s, code ID %016llx", kernel_handle,
+        source_handle, record.name.c_str(),
+        static_cast<unsigned long long>(record.code_id));
 }
 
 KernelInfo get_kernel_info(void *kernel_handle) {
-  if (kernel_handle == nullptr) return KernelInfo{"", 0, false};
+  if (kernel_handle == nullptr) return KernelInfo{"", 0, false, false};
 
   std::lock_guard<std::mutex> lock(registry_mutex);
   auto it = kernel_map.find(kernel_handle);
-  if (it == kernel_map.end()) return KernelInfo{"", 0, false};
+  if (it == kernel_map.end()) return KernelInfo{"", 0, false, false};
 
-  return KernelInfo{it->second.name, it->second.code_id, true};
+  return KernelInfo{it->second.name, it->second.code_id, true,
+                    it->second.code_id_found};
 }
 
 void send_kernel_launch(const KernelLaunch &launch) {
@@ -349,9 +349,8 @@ void send_kernel_launch(const KernelLaunch &launch) {
   snprintf(event.kernel_name, sizeof(event.kernel_name), "%s",
            kernel.found ? kernel.name.c_str() : "");
   event.kernel_name_found = kernel.found ? 1 : 0;
-  event.code_id = kernel.found ? kernel.code_id : SG_CODE_ID_UNKNOWN;
-  event.code_id_found =
-      kernel.found && kernel.code_id != SG_CODE_ID_UNKNOWN ? 1 : 0;
+  event.code_id = kernel.code_id;
+  event.code_id_found = kernel.code_id_found ? 1 : 0;
   event.kernel_handle =
       reinterpret_cast<uint64_t>(launch.kernel_handle);
   event.grid_dim_x = launch.gridDimX;
@@ -366,18 +365,18 @@ void send_kernel_launch(const KernelLaunch &launch) {
            launch.device_pci_bus_id != nullptr ? launch.device_pci_bus_id : "");
 
   if (launch.has_dimensions) {
-    DEBUG("Captured kernel launch: kernel %p -> name %s, code ID %u, gridDim (%u, %u, %u), blockDim (%u, %u, %u), sharedMemBytes %u, stream %p, device %s",
+    DEBUG("Captured kernel launch: kernel %p -> name %s, code ID %016llx, gridDim (%u, %u, %u), blockDim (%u, %u, %u), sharedMemBytes %u, stream %p, device %s",
           launch.kernel_handle,
           kernel.found ? kernel.name.c_str() : "<unknown>",
-          kernel.found ? kernel.code_id : UINT32_MAX, launch.gridDimX,
-          launch.gridDimY, launch.gridDimZ, launch.blockDimX,
-          launch.blockDimY, launch.blockDimZ, launch.sharedMemBytes,
-          launch.stream_handle, launch.device_pci_bus_id);
+          static_cast<unsigned long long>(kernel.code_id), launch.gridDimX,
+          launch.gridDimY, launch.gridDimZ, launch.blockDimX, launch.blockDimY,
+          launch.blockDimZ, launch.sharedMemBytes, launch.stream_handle,
+          launch.device_pci_bus_id);
   } else {
-    DEBUG("Captured kernel launch: kernel %p -> name %s, code ID %u, config <null>, device %s",
+    DEBUG("Captured kernel launch: kernel %p -> name %s, code ID %016llx, config <null>, device %s",
           launch.kernel_handle,
           kernel.found ? kernel.name.c_str() : "<unknown>",
-          kernel.found ? kernel.code_id : UINT32_MAX,
+          static_cast<unsigned long long>(kernel.code_id),
           launch.device_pci_bus_id);
   }
 

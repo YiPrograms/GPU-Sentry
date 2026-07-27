@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -148,6 +149,10 @@ func (c *collector) store(env *protocol.Envelope) error {
 	case *protocol.Envelope_Code:
 		return c.storeCode(sessionDir, env, event.Code)
 	case *protocol.Envelope_KernelLaunch:
+		var codeID any
+		if event.KernelLaunch.CodeId != nil {
+			codeID = event.KernelLaunch.GetCodeId()
+		}
 		row := map[string]any{
 			"type":              "kernel_launch",
 			"received_at":       time.Now().Format(time.RFC3339Nano),
@@ -157,7 +162,7 @@ func (c *collector) store(env *protocol.Envelope) error {
 			"pid":               env.Pid,
 			"tid":               env.Tid,
 			"kernel_name":       event.KernelLaunch.KernelName,
-			"code_id":           event.KernelLaunch.CodeId,
+			"code_id":           codeID,
 			"grid_dim":          []uint32{event.KernelLaunch.GridDimX, event.KernelLaunch.GridDimY, event.KernelLaunch.GridDimZ},
 			"block_dim":         []uint32{event.KernelLaunch.BlockDimX, event.KernelLaunch.BlockDimY, event.KernelLaunch.BlockDimZ},
 			"shared_mem_bytes":  event.KernelLaunch.SharedMemBytes,
@@ -242,16 +247,18 @@ func (c *collector) storeProcessInfo(sessionDir string, env *protocol.Envelope, 
 }
 
 func (c *collector) storeCode(sessionDir string, env *protocol.Envelope, code *protocol.CodeEvent) error {
-	hash := hex.EncodeToString(code.Sha256)
-	if hash == "" {
-		hash = "nohash"
+	digest := sha256.Sum256(code.Data)
+	expectedID := binary.BigEndian.Uint64(digest[:8])
+	if code.CodeId != expectedID {
+		return fmt.Errorf("code_id %016x does not match content hash %016x", code.CodeId, expectedID)
 	}
-	name := fmt.Sprintf("code_%d_%s.bin", code.CodeId, hash)
+	hash := hex.EncodeToString(digest[:])
+	name := fmt.Sprintf("code_%016x.bin", code.CodeId)
 	path := filepath.Join(sessionDir, "code", safeName(name))
 	if err := os.WriteFile(path, code.Data, 0o644); err != nil {
 		return err
 	}
-	logf("code stored session=%s code_id=%d size=%d sha256=%s", shortSession(env.SessionId), code.CodeId, len(code.Data), hash)
+	logf("code stored session=%s code_id=%016x size=%d sha256=%s", shortSession(env.SessionId), code.CodeId, len(code.Data), hash)
 	c.online.send(map[string]any{
 		"type":         "code_object",
 		"session_id":   env.SessionId,

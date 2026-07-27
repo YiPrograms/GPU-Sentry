@@ -32,9 +32,8 @@ Decision policy
 The hook embeds the active NVIDIA `libcuda` implementation and forwards CUDA
 calls to it. Applications continue running when the analysis services are
 unavailable. CUPTI module callbacks capture cubins loaded internally by CUDA
-libraries such as cuBLAS. The telemetry client deduplicates identical code
-objects by type and SHA-256 and remaps launches to the first matching code ID.
-PTX, fatbins, and generated cubins remain separate artifacts.
+libraries such as cuBLAS. A code object's ID is the first 64 bits of its
+SHA-256 digest. Identical objects share an ID and are captured once.
 
 ## Repository Layout
 

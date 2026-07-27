@@ -76,7 +76,7 @@ $(BUILD)/telemetry.o: src/telemetry.cc include/telemetry.h | $(BUILD)
 $(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h include/cupti_capture.h $(COLLECTOR_CONFIG) | $(BUILD)
 	$(CXX) $(CFLAGS) -include $(COLLECTOR_CONFIG) -c src/telemetry_bridge.cc -o $@
 
-$(GO_ARCHIVE): $(GO_DIR)/client/main.go $(GO_DIR)/internal/codeindex/*.go $(GO_DIR)/go.mod $(GO_DIR)/go.sum $(GO_DIR)/protocol/telemetry.pb.go include/telemetry.h | $(BUILD)
+$(GO_ARCHIVE): $(GO_DIR)/client/main.go $(GO_DIR)/internal/codeid/*.go $(GO_DIR)/go.mod $(GO_DIR)/go.sum $(GO_DIR)/protocol/telemetry.pb.go include/telemetry.h | $(BUILD)
 	cd $(GO_DIR) && $(GO_ENV) $(GO) build -buildmode=c-archive -o ../$(GO_ARCHIVE) ./client
 
 $(GO_SERVER): $(GO_DIR)/cmd/gpu-sentry-collector/*.go $(GO_DIR)/go.mod $(GO_DIR)/go.sum $(GO_DIR)/protocol/telemetry.pb.go | $(BUILD)

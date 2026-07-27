@@ -10,7 +10,6 @@ extern "C" {
 
 #define SG_KERNEL_NAME_MAX 256
 #define SG_DEVICE_ID_MAX 32
-#define SG_CODE_ID_UNKNOWN UINT32_MAX
 
 enum SGEventKind {
   SG_EVENT_CODE = 1,
@@ -23,7 +22,7 @@ typedef struct SGClientConfig {
 } SGClientConfig;
 
 typedef struct SGCodeEvent {
-  uint32_t code_id;
+  uint64_t code_id;
   uint32_t code_type;
   const void *data;
   uint64_t data_size;
@@ -32,7 +31,7 @@ typedef struct SGCodeEvent {
 typedef struct SGKernelLaunchEvent {
   char kernel_name[SG_KERNEL_NAME_MAX];
   uint8_t kernel_name_found;
-  uint32_t code_id;
+  uint64_t code_id;
   uint8_t code_id_found;
   uint64_t kernel_handle;
   uint32_t grid_dim_x;
@@ -64,7 +63,7 @@ typedef struct SGTelemetryStats {
 
 int sg_telemetry_init(uint32_t capacity);
 void sg_telemetry_shutdown(void);
-int sg_enqueue_code(uint32_t code_id, uint32_t code_type, const void *data,
+int sg_enqueue_code(uint64_t code_id, uint32_t code_type, const void *data,
                     uint64_t data_size);
 int sg_enqueue_kernel_launch(const SGKernelLaunchEvent *launch);
 size_t sg_ring_pop_batch(SGEvent *out, size_t max_events);
@@ -73,6 +72,7 @@ void sg_ring_stats(SGTelemetryStats *stats);
 
 void sg_go_start(SGClientConfig *config);
 void sg_go_stop(void);
+uint64_t sg_code_id(void *data, uint64_t size);
 
 #ifdef __cplusplus
 }

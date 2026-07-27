@@ -7,8 +7,9 @@
 
 struct KernelInfo {
   std::string name;
-  uint32_t code_id;
+  uint64_t code_id;
   bool found;
+  bool code_id_found;
 };
 
 struct KernelLaunch {

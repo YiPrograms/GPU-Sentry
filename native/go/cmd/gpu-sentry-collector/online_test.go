@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"gpu-sentry/native/internal/codeid"
+	"gpu-sentry/native/protocol"
 )
 
 func TestLoadOnlineConfig(t *testing.T) {
@@ -77,5 +80,27 @@ func TestLaunchBatcherFlushByCount(t *testing.T) {
 	launches, ok := message["launches"].([]map[string]any)
 	if message["type"] != "kernel_launch_batch" || !ok || len(launches) != 2 {
 		t.Fatalf("unexpected batch: %#v", message)
+	}
+}
+
+func TestStoreCodeValidatesCodeID(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "session")
+	if err := os.MkdirAll(filepath.Join(sessionDir, "code"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	data := []byte("code object")
+	codeID := codeid.FromBytes(data)
+	c := &collector{root: root, online: newOnlineClient(onlineConfig{})}
+	env := &protocol.Envelope{SessionId: "session"}
+	code := &protocol.CodeEvent{CodeId: codeID, CodeType: 2, Data: data}
+	if err := c.storeCode(sessionDir, env, code); err != nil {
+		t.Fatal(err)
+	}
+
+	code.CodeId++
+	if err := c.storeCode(sessionDir, env, code); err == nil {
+		t.Fatal("mismatched code ID was accepted")
 	}
 }

@@ -410,10 +410,9 @@ func (x *ClientHello) GetPid() uint32 {
 
 type CodeEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	CodeId        uint32                 `protobuf:"varint,1,opt,name=code_id,json=codeId,proto3" json:"code_id,omitempty"`
+	CodeId        uint64                 `protobuf:"fixed64,1,opt,name=code_id,json=codeId,proto3" json:"code_id,omitempty"`
 	CodeType      uint32                 `protobuf:"varint,2,opt,name=code_type,json=codeType,proto3" json:"code_type,omitempty"`
-	Sha256        []byte                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
-	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -448,7 +447,7 @@ func (*CodeEvent) Descriptor() ([]byte, []int) {
 	return file_proto_telemetry_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *CodeEvent) GetCodeId() uint32 {
+func (x *CodeEvent) GetCodeId() uint64 {
 	if x != nil {
 		return x.CodeId
 	}
@@ -462,13 +461,6 @@ func (x *CodeEvent) GetCodeType() uint32 {
 	return 0
 }
 
-func (x *CodeEvent) GetSha256() []byte {
-	if x != nil {
-		return x.Sha256
-	}
-	return nil
-}
-
 func (x *CodeEvent) GetData() []byte {
 	if x != nil {
 		return x.Data
@@ -479,7 +471,7 @@ func (x *CodeEvent) GetData() []byte {
 type KernelLaunchEvent struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	KernelName     string                 `protobuf:"bytes,2,opt,name=kernel_name,json=kernelName,proto3" json:"kernel_name,omitempty"`
-	CodeId         uint32                 `protobuf:"varint,3,opt,name=code_id,json=codeId,proto3" json:"code_id,omitempty"`
+	CodeId         *uint64                `protobuf:"fixed64,3,opt,name=code_id,json=codeId,proto3,oneof" json:"code_id,omitempty"`
 	GridDimX       uint32                 `protobuf:"varint,4,opt,name=grid_dim_x,json=gridDimX,proto3" json:"grid_dim_x,omitempty"`
 	GridDimY       uint32                 `protobuf:"varint,5,opt,name=grid_dim_y,json=gridDimY,proto3" json:"grid_dim_y,omitempty"`
 	GridDimZ       uint32                 `protobuf:"varint,6,opt,name=grid_dim_z,json=gridDimZ,proto3" json:"grid_dim_z,omitempty"`
@@ -530,9 +522,9 @@ func (x *KernelLaunchEvent) GetKernelName() string {
 	return ""
 }
 
-func (x *KernelLaunchEvent) GetCodeId() uint32 {
-	if x != nil {
-		return x.CodeId
+func (x *KernelLaunchEvent) GetCodeId() uint64 {
+	if x != nil && x.CodeId != nil {
+		return *x.CodeId
 	}
 	return 0
 }
@@ -852,16 +844,15 @@ const file_proto_telemetry_proto_rawDesc = "" +
 	"\vClientHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
-	"\x03pid\x18\x02 \x01(\rR\x03pid\"m\n" +
+	"\x03pid\x18\x02 \x01(\rR\x03pid\"U\n" +
 	"\tCodeEvent\x12\x17\n" +
-	"\acode_id\x18\x01 \x01(\rR\x06codeId\x12\x1b\n" +
-	"\tcode_type\x18\x02 \x01(\rR\bcodeType\x12\x16\n" +
-	"\x06sha256\x18\x03 \x01(\fR\x06sha256\x12\x12\n" +
-	"\x04data\x18\x04 \x01(\fR\x04data\"\xf4\x02\n" +
+	"\acode_id\x18\x01 \x01(\x06R\x06codeId\x12\x1b\n" +
+	"\tcode_type\x18\x02 \x01(\rR\bcodeType\x12\x12\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\"\x85\x03\n" +
 	"\x11KernelLaunchEvent\x12\x1f\n" +
 	"\vkernel_name\x18\x02 \x01(\tR\n" +
-	"kernelName\x12\x17\n" +
-	"\acode_id\x18\x03 \x01(\rR\x06codeId\x12\x1c\n" +
+	"kernelName\x12\x1c\n" +
+	"\acode_id\x18\x03 \x01(\x06H\x00R\x06codeId\x88\x01\x01\x12\x1c\n" +
 	"\n" +
 	"grid_dim_x\x18\x04 \x01(\rR\bgridDimX\x12\x1c\n" +
 	"\n" +
@@ -874,7 +865,9 @@ const file_proto_telemetry_proto_rawDesc = "" +
 	"\x10shared_mem_bytes\x18\n" +
 	" \x01(\rR\x0esharedMemBytes\x12\x16\n" +
 	"\x06stream\x18\v \x01(\x04R\x06stream\x12)\n" +
-	"\x11device_pci_bus_id\x18\f \x01(\tR\x0edevicePciBusId\"}\n" +
+	"\x11device_pci_bus_id\x18\f \x01(\tR\x0edevicePciBusIdB\n" +
+	"\n" +
+	"\b_code_id\"}\n" +
 	"\n" +
 	"StatsEvent\x12%\n" +
 	"\x0edropped_events\x18\x01 \x01(\x04R\rdroppedEvents\x12#\n" +
@@ -950,6 +943,7 @@ func file_proto_telemetry_proto_init() {
 		(*Envelope_KernelLaunch)(nil),
 		(*Envelope_Stats)(nil),
 	}
+	file_proto_telemetry_proto_msgTypes[4].OneofWrappers = []any{}
 	file_proto_telemetry_proto_msgTypes[6].OneofWrappers = []any{
 		(*ServerEnvelope_Control)(nil),
 	}

@@ -128,7 +128,7 @@ void sg_telemetry_shutdown(void) {
   pthread_mutex_unlock(&ring_mutex);
 }
 
-int sg_enqueue_code(uint32_t code_id, uint32_t code_type, const void *data,
+int sg_enqueue_code(uint64_t code_id, uint32_t code_type, const void *data,
                     uint64_t data_size) {
   if (data == nullptr || data_size == 0) return 0;
 
