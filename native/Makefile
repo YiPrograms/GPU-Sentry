@@ -7,6 +7,8 @@ SUDO     ?= sudo
 
 BUILD ?= build
 DOCKER_BUILD ?= build-ubuntu20
+COLLECTOR_IP ?= 127.0.0.1
+COLLECTOR_PORT ?= 59400
 LIBCUDA_LINK ?= /usr/lib/x86_64-linux-gnu/libcuda.so.1
 LIBCUDA ?= $(shell readlink -f $(LIBCUDA_LINK))
 BACKUP_DIR ?= .driver-backups
@@ -19,6 +21,7 @@ DOCKER_TARGET := $(DOCKER_BUILD)/libcuda.so.1
 GO_DIR := go
 GO_ARCHIVE := $(BUILD)/libgpu_sentry_go.a
 GO_SERVER := $(BUILD)/gpu-sentry-collector
+COLLECTOR_CONFIG := $(BUILD)/collector_config.h
 GO_ENV := GOCACHE=/tmp/gpu-sentry-go-cache GOMODCACHE=/tmp/gpu-sentry-go-modcache PATH=$(HOME)/go/bin:$(PATH)
 INCLUDES := -Iinclude -Iinclude/vendor
 CFLAGS := -O2 -Wall -Wextra -g -fPIC $(INCLUDES)
@@ -29,6 +32,11 @@ all: $(TARGET) $(GO_SERVER)
 
 $(BUILD):
 	mkdir -p $(BUILD)
+
+$(COLLECTOR_CONFIG): FORCE | $(BUILD)
+	@printf '%s\n' '#define GPU_SENTRY_DEFAULT_SERVER_ADDR "$(COLLECTOR_IP):$(COLLECTOR_PORT)"' > $@.tmp
+	@cmp -s $@.tmp $@ || mv $@.tmp $@
+	@rm -f $@.tmp
 
 include/cuda_symbols.def: $(REAL_LIBCUDA) hooked_symbols scripts/gen_trampoline_symbols.py
 	$(PYTHON) scripts/gen_trampoline_symbols.py $(REAL_LIBCUDA)
@@ -62,8 +70,8 @@ $(BUILD)/code_registry.o: src/code_registry.cc include/code_registry.h include/t
 $(BUILD)/telemetry.o: src/telemetry.cc include/telemetry.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/telemetry.cc -o $@
 
-$(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h | $(BUILD)
-	$(CXX) $(CFLAGS) -c src/telemetry_bridge.cc -o $@
+$(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h $(COLLECTOR_CONFIG) | $(BUILD)
+	$(CXX) $(CFLAGS) -include $(COLLECTOR_CONFIG) -c src/telemetry_bridge.cc -o $@
 
 $(GO_ARCHIVE): $(GO_DIR)/client/main.go $(GO_DIR)/go.mod $(GO_DIR)/go.sum $(GO_DIR)/protocol/telemetry.pb.go include/telemetry.h | $(BUILD)
 	cd $(GO_DIR) && $(GO_ENV) $(GO) build -buildmode=c-archive -o ../$(GO_ARCHIVE) ./client
@@ -91,6 +99,8 @@ docker-build: $(REAL_LIBCUDA)
 	docker build \
 		-f Dockerfile.ubuntu20 \
 		--build-arg "REAL_LIBCUDA=$(REAL_LIBCUDA)" \
+		--build-arg "COLLECTOR_IP=$(COLLECTOR_IP)" \
+		--build-arg "COLLECTOR_PORT=$(COLLECTOR_PORT)" \
 		--target artifacts \
 		--output "type=local,dest=$(DOCKER_BUILD)" \
 		.
@@ -129,4 +139,6 @@ restore:
 	$(SUDO) mv -f "$(INSTALL_TMP)" "$(LIBCUDA)"
 	@echo "NVIDIA CUDA driver library restored at $(LIBCUDA)"
 
-.PHONY: all clean docker-build install install-docker restore
+FORCE:
+
+.PHONY: all clean docker-build install install-docker restore FORCE

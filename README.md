@@ -13,7 +13,7 @@ CUDA application
 CUDA driver hook
   captures modules, functions, and kernel launches
       |
-      v  TCP 127.0.0.1:59400
+      v  TCP COLLECTOR_IP:COLLECTOR_PORT
 Go collector
   resolves launch metadata and stores captures
       |
@@ -72,10 +72,11 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
-Build the hook and collector on the deployment host:
+Build the hook and collector on the deployment host. Set the address where the
+hook can reach the collector:
 
 ```bash
-make -j
+make -j COLLECTOR_IP=127.0.0.1 COLLECTOR_PORT=59400
 ```
 
 The build creates:
@@ -88,12 +89,18 @@ native/build/gpu-sentry-collector
 For an Ubuntu 20.04-compatible build:
 
 ```bash
-make docker-build
+make docker-build COLLECTOR_IP=127.0.0.1 COLLECTOR_PORT=59400
 ```
 
 The Docker artifacts are written to `native/build-ubuntu20/`. The build records
 the required glibc versions in
 `native/build-ubuntu20/glibc-versions.txt`.
+
+Use the collector host's reachable IP when the CUDA application and collector
+run on different machines. Set `collector.listen_address` in `config.json` to
+the matching address and port. For example, a collector accepting remote
+connections can listen on `0.0.0.0:59400` while the hook uses the collector
+host's IP.
 
 ## Model
 
@@ -126,7 +133,7 @@ The build stores a driver-specific copy of the active NVIDIA library under
 Install the native hook:
 
 ```bash
-make install
+make install COLLECTOR_IP=127.0.0.1 COLLECTOR_PORT=59400
 ```
 
 Install the Ubuntu 20.04 hook:
@@ -152,7 +159,10 @@ CUDA applications can now run normally:
 your-cuda-program [arguments...]
 ```
 
-`GPU_SENTRY_SERVER_ADDR` selects a different collector address.
+The deployment script sets `GPU_SENTRY_DISABLE=1` for the processor and
+collector so the processor's PyTorch inference is not captured recursively.
+The hook uses the collector address compiled into the library.
+`GPU_SENTRY_SERVER_ADDR=host:port` overrides it for one process.
 `GPU_SENTRY_DISABLE=1` disables telemetry for one process.
 
 Stop the deployment and restore the NVIDIA library:
