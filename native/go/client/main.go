@@ -24,6 +24,7 @@ import (
 	"time"
 	"unsafe"
 
+	"gpu-sentry/native/internal/codeindex"
 	"gpu-sentry/native/protocol"
 
 	"google.golang.org/protobuf/proto"
@@ -47,6 +48,7 @@ type clientConfig struct {
 	processInfo        *protocol.ProcessInfoEvent
 	pid                uint32
 	processInfoWasSent bool
+	codeIndex          *codeindex.Index
 }
 
 //export sg_go_start
@@ -89,6 +91,7 @@ func loadConfig(raw *C.SGClientConfig) clientConfig {
 		batchSize:        128,
 		reconnectBackoff: time.Second,
 		hookVersion:      "unknown",
+		codeIndex:        codeindex.New(),
 	}
 	if raw != nil {
 		if raw.server_addr != nil {
@@ -201,7 +204,7 @@ func drainLoop(conn net.Conn, cfg *clientConfig, stop <-chan struct{}) error {
 
 		events := unsafe.Slice((*C.SGEvent)(buf), int(n))
 		for i := range events {
-			env := convertEvent(&events[i], cfg.sessionID)
+			env := convertEvent(&events[i], cfg.sessionID, cfg.codeIndex)
 			if env == nil {
 				continue
 			}
@@ -214,7 +217,7 @@ func drainLoop(conn net.Conn, cfg *clientConfig, stop <-chan struct{}) error {
 	}
 }
 
-func convertEvent(ev *C.SGEvent, sessionID string) *protocol.Envelope {
+func convertEvent(ev *C.SGEvent, sessionID string, codeIndex *codeindex.Index) *protocol.Envelope {
 	env := &protocol.Envelope{
 		SessionId:   sessionID,
 		Sequence:    uint64(ev.sequence),
@@ -226,7 +229,14 @@ func convertEvent(ev *C.SGEvent, sessionID string) *protocol.Envelope {
 	switch uint32(ev.kind) {
 	case C.SG_EVENT_CODE:
 		data := C.GoBytes(unsafe.Pointer(ev.code.data), C.int(ev.code.data_size))
-		sum := sha256.Sum256(data)
+		sum, duplicate := codeIndex.Register(
+			uint32(ev.code.code_id),
+			uint32(ev.code.code_type),
+			data,
+		)
+		if duplicate {
+			return nil
+		}
 		env.Event = &protocol.Envelope_Code{Code: &protocol.CodeEvent{
 			CodeId:   uint32(ev.code.code_id),
 			CodeType: uint32(ev.code.code_type),
@@ -236,7 +246,7 @@ func convertEvent(ev *C.SGEvent, sessionID string) *protocol.Envelope {
 	case C.SG_EVENT_KERNEL_LAUNCH:
 		env.Event = &protocol.Envelope_KernelLaunch{KernelLaunch: &protocol.KernelLaunchEvent{
 			KernelName:     cStringFromArray(unsafe.Pointer(&ev.launch.kernel_name[0])),
-			CodeId:         uint32(ev.launch.code_id),
+			CodeId:         codeIndex.Canonical(uint32(ev.launch.code_id)),
 			GridDimX:       uint32(ev.launch.grid_dim_x),
 			GridDimY:       uint32(ev.launch.grid_dim_y),
 			GridDimZ:       uint32(ev.launch.grid_dim_z),
