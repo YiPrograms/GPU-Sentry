@@ -31,7 +31,8 @@ Decision policy
 
 The hook embeds the active NVIDIA `libcuda` implementation and forwards CUDA
 calls to it. Applications continue running when the analysis services are
-unavailable.
+unavailable. CUPTI module callbacks capture cubins loaded internally by CUDA
+libraries such as cuBLAS.
 
 ## Repository Layout
 
@@ -53,6 +54,7 @@ artifacts/                   generated captures, models, and reports
 - Linux x86-64
 - NVIDIA GPU and driver
 - CUDA 12.6 with `nvcc`, `nvdisasm`, and `cuobjdump`
+- CUPTI from the CUDA toolkit
 - Python 3.11 or newer
 - Go, GCC, G++, GNU ld, and make
 - Docker for the Ubuntu 20.04 build
@@ -163,6 +165,7 @@ The deployment script sets `GPU_SENTRY_DISABLE=1` for the processor and
 collector so the processor's PyTorch inference is not captured recursively.
 The hook uses the collector address compiled into the library.
 `GPU_SENTRY_SERVER_ADDR=host:port` overrides it for one process.
+`GPU_SENTRY_CUPTI_PATH` selects a nonstandard `libcupti.so` location.
 `GPU_SENTRY_DISABLE=1` disables telemetry for one process.
 
 Stop the deployment and restore the NVIDIA library:

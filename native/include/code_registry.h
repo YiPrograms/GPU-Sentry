@@ -1,6 +1,7 @@
 #ifndef CUHOOK_CODE_REGISTRY_H
 #define CUHOOK_CODE_REGISTRY_H
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -25,6 +26,7 @@ struct KernelLaunch {
 };
 
 void load_code(const void *code, void *owner_handle, bool is_path = false);
+void capture_cubin(const void *code, size_t size);
 void map_module_to_library(void *module_handle, void *library_handle);
 void register_kernel(void *kernel_handle, void *owner_handle, const char *name);
 KernelInfo get_kernel_info(void *kernel_handle);

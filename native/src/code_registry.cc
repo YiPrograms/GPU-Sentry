@@ -55,6 +55,7 @@ std::vector<void *> code_handles;
 std::unordered_map<void *, uint32_t> code_id_by_handle;
 std::unordered_map<void *, void *> module_to_library_map;
 std::unordered_map<void *, KernelRecord> kernel_map;
+std::unordered_map<std::string, uint32_t> code_id_by_kernel_name;
 
 void send_code(const void *code, size_t size, uint32_t code_type,
                uint32_t code_id) {
@@ -131,6 +132,63 @@ uint32_t register_code_handle(void *owner_handle) {
   DEBUG("code owner %p -> code ID %u", owner_handle, code_id);
 
   return code_id;
+}
+
+uint32_t next_code_id_locked() {
+  code_handles.push_back(nullptr);
+  return static_cast<uint32_t>(code_handles.size() - 1);
+}
+
+bool range_fits(size_t offset, size_t count, size_t item_size, size_t size) {
+  return offset <= size && item_size != 0 && count <= (size - offset) / item_size;
+}
+
+void index_cubin_symbols(const void *code, size_t size, uint32_t code_id) {
+  if (size < sizeof(Elf64_Ehdr)) return;
+
+  const auto *bytes = static_cast<const unsigned char *>(code);
+  const auto *ehdr = reinterpret_cast<const Elf64_Ehdr *>(bytes);
+  if (std::memcmp(ehdr->e_ident, ELFMAG, SELFMAG) != 0 ||
+      ehdr->e_ident[EI_CLASS] != ELFCLASS64 ||
+      ehdr->e_shentsize != sizeof(Elf64_Shdr) ||
+      !range_fits(ehdr->e_shoff, ehdr->e_shnum, sizeof(Elf64_Shdr), size)) {
+    return;
+  }
+
+  const auto *sections =
+      reinterpret_cast<const Elf64_Shdr *>(bytes + ehdr->e_shoff);
+  for (uint16_t i = 0; i < ehdr->e_shnum; ++i) {
+    const Elf64_Shdr &symbols = sections[i];
+    if ((symbols.sh_type != SHT_SYMTAB && symbols.sh_type != SHT_DYNSYM) ||
+        symbols.sh_entsize != sizeof(Elf64_Sym) ||
+        symbols.sh_link >= ehdr->e_shnum ||
+        !range_fits(symbols.sh_offset, symbols.sh_size / symbols.sh_entsize,
+                    symbols.sh_entsize, size)) {
+      continue;
+    }
+
+    const Elf64_Shdr &strings = sections[symbols.sh_link];
+    if (strings.sh_offset > size || strings.sh_size > size - strings.sh_offset) {
+      continue;
+    }
+
+    const auto *entries =
+        reinterpret_cast<const Elf64_Sym *>(bytes + symbols.sh_offset);
+    const char *names = reinterpret_cast<const char *>(bytes + strings.sh_offset);
+    const size_t count = symbols.sh_size / symbols.sh_entsize;
+    for (size_t j = 0; j < count; ++j) {
+      const Elf64_Sym &symbol = entries[j];
+      if (ELF64_ST_TYPE(symbol.st_info) != STT_FUNC ||
+          symbol.st_shndx == SHN_UNDEF || symbol.st_name >= strings.sh_size) {
+        continue;
+      }
+      const char *name = names + symbol.st_name;
+      const size_t remaining = strings.sh_size - symbol.st_name;
+      if (name[0] != '\0' && std::memchr(name, '\0', remaining) != nullptr) {
+        code_id_by_kernel_name[name] = code_id;
+      }
+    }
+  }
 }
 
 uint32_t get_code_id_locked(void *owner_handle) {
@@ -212,6 +270,20 @@ void load_code(const void *code, void *owner_handle, bool is_path) {
   }
 }
 
+void capture_cubin(const void *code, size_t size) {
+  if (code == nullptr || size == 0) return;
+
+  uint32_t code_id;
+  {
+    std::lock_guard<std::mutex> lock(registry_mutex);
+    code_id = next_code_id_locked();
+    index_cubin_symbols(code, size, code_id);
+  }
+
+  DEBUG("CUPTI captured cubin (id %u, size %zu bytes)", code_id, size);
+  send_code(code, size, CODE_TYPE_CUBIN, code_id);
+}
+
 void map_module_to_library(void *module_handle, void *library_handle) {
   if (module_handle == nullptr || library_handle == nullptr) return;
 
@@ -226,7 +298,14 @@ void register_kernel(void *kernel_handle, void *owner_handle,
   if (kernel_handle == nullptr || name == nullptr) return;
 
   std::lock_guard<std::mutex> lock(registry_mutex);
-  const uint32_t code_id = get_code_id_locked(owner_handle);
+  uint32_t code_id = get_code_id_locked(owner_handle);
+
+  if (code_id == UINT32_MAX) {
+    auto it = code_id_by_kernel_name.find(name);
+    if (it != code_id_by_kernel_name.end()) {
+      code_id = it->second;
+    }
+  }
 
   if (code_id == UINT32_MAX) {
     DEBUG("owner %p -> code ID <not found> for kernel %s", owner_handle, name);

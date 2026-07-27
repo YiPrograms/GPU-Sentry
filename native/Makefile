@@ -26,7 +26,7 @@ GO_ENV := GOCACHE=/tmp/gpu-sentry-go-cache GOMODCACHE=/tmp/gpu-sentry-go-modcach
 INCLUDES := -Iinclude -Iinclude/vendor
 CFLAGS := -O2 -Wall -Wextra -g -fPIC $(INCLUDES)
 
-OBJS := $(BUILD)/loader.o $(BUILD)/trampolines.o $(BUILD)/libcuda_blob.o $(BUILD)/hook.o $(BUILD)/code_registry.o $(BUILD)/telemetry.o $(BUILD)/telemetry_bridge.o
+OBJS := $(BUILD)/loader.o $(BUILD)/trampolines.o $(BUILD)/libcuda_blob.o $(BUILD)/hook.o $(BUILD)/code_registry.o $(BUILD)/cupti_capture.o $(BUILD)/telemetry.o $(BUILD)/telemetry_bridge.o
 
 all: $(TARGET) $(GO_SERVER)
 
@@ -67,10 +67,13 @@ $(BUILD)/hook.o: src/hook.cc include/cuda_symbols.def include/code_registry.h | 
 $(BUILD)/code_registry.o: src/code_registry.cc include/code_registry.h include/telemetry.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/code_registry.cc -o $@
 
+$(BUILD)/cupti_capture.o: src/cupti_capture.cc include/cupti_capture.h include/code_registry.h | $(BUILD)
+	$(CXX) $(CFLAGS) -c src/cupti_capture.cc -o $@
+
 $(BUILD)/telemetry.o: src/telemetry.cc include/telemetry.h | $(BUILD)
 	$(CXX) $(CFLAGS) -c src/telemetry.cc -o $@
 
-$(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h $(COLLECTOR_CONFIG) | $(BUILD)
+$(BUILD)/telemetry_bridge.o: src/telemetry_bridge.cc include/telemetry.h include/config.h include/cupti_capture.h $(COLLECTOR_CONFIG) | $(BUILD)
 	$(CXX) $(CFLAGS) -include $(COLLECTOR_CONFIG) -c src/telemetry_bridge.cc -o $@
 
 $(GO_ARCHIVE): $(GO_DIR)/client/main.go $(GO_DIR)/go.mod $(GO_DIR)/go.sum $(GO_DIR)/protocol/telemetry.pb.go include/telemetry.h | $(BUILD)

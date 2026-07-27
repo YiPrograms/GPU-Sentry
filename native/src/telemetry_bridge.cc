@@ -6,6 +6,7 @@
 #include <cstring>
 #include <strings.h>
 
+#include "cupti_capture.h"
 #include "debug.h"
 
 namespace {
@@ -54,6 +55,8 @@ static void telemetry_constructor(void) {
     return;
   }
 
+  start_cupti_capture();
+
   int err = pthread_create(&telemetry_thread, nullptr, start_go_client, nullptr);
   if (err == 0) {
     pthread_detach(telemetry_thread);
@@ -65,6 +68,7 @@ static void telemetry_constructor(void) {
 
 __attribute__((destructor))
 static void telemetry_destructor(void) {
+  stop_cupti_capture();
   if (telemetry_started) {
     sg_go_stop();
   }
