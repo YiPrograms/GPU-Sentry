@@ -7,8 +7,7 @@ SUDO     ?= sudo
 
 BUILD ?= build
 DOCKER_BUILD ?= build-ubuntu20
-COLLECTOR_IP ?= 127.0.0.1
-COLLECTOR_PORT ?= 59400
+GPU_SENTRY_SERVER_ADDR ?= 127.0.0.1:59400
 LIBCUDA_LINK ?= /usr/lib/x86_64-linux-gnu/libcuda.so.1
 LIBCUDA ?= $(shell readlink -f $(LIBCUDA_LINK))
 BACKUP_DIR ?= .driver-backups
@@ -34,7 +33,7 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 $(COLLECTOR_CONFIG): FORCE | $(BUILD)
-	@printf '%s\n' '#define GPU_SENTRY_DEFAULT_SERVER_ADDR "$(COLLECTOR_IP):$(COLLECTOR_PORT)"' > $@.tmp
+	@printf '%s\n' '#define GPU_SENTRY_DEFAULT_SERVER_ADDR "$(GPU_SENTRY_SERVER_ADDR)"' > $@.tmp
 	@cmp -s $@.tmp $@ || mv $@.tmp $@
 	@rm -f $@.tmp
 
@@ -102,8 +101,7 @@ docker-build: $(REAL_LIBCUDA)
 	docker build \
 		-f Dockerfile.ubuntu20 \
 		--build-arg "REAL_LIBCUDA=$(REAL_LIBCUDA)" \
-		--build-arg "COLLECTOR_IP=$(COLLECTOR_IP)" \
-		--build-arg "COLLECTOR_PORT=$(COLLECTOR_PORT)" \
+		--build-arg "GPU_SENTRY_SERVER_ADDR=$(GPU_SENTRY_SERVER_ADDR)" \
 		--target artifacts \
 		--output "type=local,dest=$(DOCKER_BUILD)" \
 		.

@@ -11,29 +11,20 @@ CUDA application
       |
       v
 CUDA driver hook
-  captures modules, functions, and kernel launches
-      |
-      v  TCP COLLECTOR_IP:COLLECTOR_PORT
-Go collector
-  resolves launch metadata and stores captures
-      |
-      v  Unix socket /tmp/gpu-sentry.sock
-Python processor
-  disassembles cubins and builds normalized SASS windows
       |
       v
-ModernBERT classifier
+Collector
+      |
+      v
+SASS processing
+      |
+      v
+Classifier
       |
       v
 Decision policy
   continues or terminates the CUDA process
 ```
-
-The hook embeds the active NVIDIA `libcuda` implementation and forwards CUDA
-calls to it. Applications continue running when the analysis services are
-unavailable. CUPTI module callbacks capture cubins loaded internally by CUDA
-libraries such as cuBLAS. A code object's ID is the first 64 bits of its
-SHA-256 digest. Identical objects share an ID and are captured once.
 
 ## Repository Layout
 
@@ -80,7 +71,7 @@ Build the hook and collector on the deployment host. Set the address where the
 hook can reach the collector:
 
 ```bash
-make -j COLLECTOR_IP=127.0.0.1 COLLECTOR_PORT=59400
+GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make -j
 ```
 
 The build creates:
@@ -93,7 +84,7 @@ native/build/gpu-sentry-collector
 For an Ubuntu 20.04-compatible build:
 
 ```bash
-make docker-build COLLECTOR_IP=127.0.0.1 COLLECTOR_PORT=59400
+GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make docker-build
 ```
 
 The Docker artifacts are written to `native/build-ubuntu20/`. The build records
@@ -137,7 +128,7 @@ The build stores a driver-specific copy of the active NVIDIA library under
 Install the native hook:
 
 ```bash
-make install COLLECTOR_IP=127.0.0.1 COLLECTOR_PORT=59400
+GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make install
 ```
 
 Install the Ubuntu 20.04 hook:

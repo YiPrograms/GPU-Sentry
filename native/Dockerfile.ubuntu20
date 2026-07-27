@@ -6,8 +6,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG GO_VERSION=1.23.12
 ARG TARGETARCH=amd64
 ARG REAL_LIBCUDA
-ARG COLLECTOR_IP=127.0.0.1
-ARG COLLECTOR_PORT=59400
+ARG GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -38,8 +37,7 @@ COPY ${REAL_LIBCUDA} /src/libcuda.so.1.real
 RUN make clean && \
     make BUILD=build-ubuntu20 \
       REAL_LIBCUDA=libcuda.so.1.real \
-      COLLECTOR_IP="${COLLECTOR_IP}" \
-      COLLECTOR_PORT="${COLLECTOR_PORT}" \
+      GPU_SENTRY_SERVER_ADDR="${GPU_SENTRY_SERVER_ADDR}" \
       all
 
 RUN set -eux; \
