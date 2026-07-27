@@ -1,18 +1,14 @@
 NATIVE_DIR := native
 
-.PHONY: all docker-build install install-docker restore clean
+.PHONY: all docker-build install restore clean
 
-all:
-	$(MAKE) -C $(NATIVE_DIR) all
+all: docker-build
 
 docker-build:
 	$(MAKE) -C $(NATIVE_DIR) docker-build
 
-install:
+install: docker-build
 	$(MAKE) -C $(NATIVE_DIR) install
-
-install-docker:
-	$(MAKE) -C $(NATIVE_DIR) install-docker
 
 restore:
 	$(MAKE) -C $(NATIVE_DIR) restore

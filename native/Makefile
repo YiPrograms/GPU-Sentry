@@ -94,7 +94,7 @@ $(TARGET): $(OBJS) $(GO_ARCHIVE)
 	  -o $(TARGET)
 
 clean:
-	rm -rf $(BUILD)
+	rm -rf $(BUILD) $(DOCKER_BUILD)
 	rm -f include/cuda_symbols.def include/cuda_trampolines.inc
 
 docker-build: $(REAL_LIBCUDA)
@@ -106,17 +106,7 @@ docker-build: $(REAL_LIBCUDA)
 		--output "type=local,dest=$(DOCKER_BUILD)" \
 		.
 
-install: $(TARGET)
-	@test -f "$(REAL_LIBCUDA)" || { \
-		echo "Refusing to install without backup $(REAL_LIBCUDA)"; \
-		exit 1; \
-	}
-	$(SUDO) install -m 0755 "$(TARGET)" "$(INSTALL_TMP)"
-	$(SUDO) mv -f "$(INSTALL_TMP)" "$(LIBCUDA)"
-	@echo "GPU-Sentry hook installed at $(LIBCUDA)"
-	@echo "Run 'make restore' from the repository root to restore the NVIDIA library."
-
-install-docker:
+install:
 	@test -f "$(DOCKER_TARGET)" || { \
 		echo "$(DOCKER_TARGET) does not exist."; \
 		echo "Build it with: make docker-build"; \
@@ -128,7 +118,7 @@ install-docker:
 	}
 	$(SUDO) install -m 0755 "$(DOCKER_TARGET)" "$(INSTALL_TMP)"
 	$(SUDO) mv -f "$(INSTALL_TMP)" "$(LIBCUDA)"
-	@echo "GPU-Sentry Ubuntu 20.04 hook installed at $(LIBCUDA)"
+	@echo "GPU-Sentry container-compatible hook installed at $(LIBCUDA)"
 	@echo "Run 'make restore' from the repository root to restore the NVIDIA library."
 
 restore:
@@ -142,4 +132,4 @@ restore:
 
 FORCE:
 
-.PHONY: all clean docker-build install install-docker restore FORCE
+.PHONY: all clean docker-build install restore FORCE

@@ -52,7 +52,7 @@ artifacts/                   generated captures, models, and reports
   `nvdisasm`, `cuobjdump`, and CUPTI
 - Python 3.11 or newer
 - Go, GCC, G++, GNU ld, and make
-- Docker for the Ubuntu 20.04 build
+- Docker
 - `sudo` access for hook installation and restoration
 
 ## Installation
@@ -70,28 +70,22 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
-Build the hook and collector on the deployment host. Set the address where the
-hook can reach the collector:
+Build the hook and collector. The build runs in Ubuntu 20.04 so the hook can be
+loaded by CUDA applications in containers with older glibc versions. Set the
+address where the hook can reach the collector:
 
 ```bash
-GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make -j
+GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make
 ```
 
 The build creates:
 
 ```text
-native/build/libcuda.so.1
-native/build/gpu-sentry-collector
+native/build-ubuntu20/libcuda.so.1
+native/build-ubuntu20/gpu-sentry-collector
 ```
 
-For an Ubuntu 20.04-compatible build:
-
-```bash
-GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make docker-build
-```
-
-The Docker artifacts are written to `native/build-ubuntu20/`. The build records
-the required glibc versions in
+The build records the required glibc versions in
 `native/build-ubuntu20/glibc-versions.txt`.
 
 Use the collector host's reachable IP when the CUDA application and collector
@@ -128,16 +122,10 @@ See [MODEL.md](MODEL.md) for model release details.
 The build stores a driver-specific copy of the active NVIDIA library under
 `native/.driver-backups/`.
 
-Install the native hook:
+Build and install the hook:
 
 ```bash
 GPU_SENTRY_SERVER_ADDR=127.0.0.1:59400 make install
-```
-
-Install the Ubuntu 20.04 hook:
-
-```bash
-make install-docker
 ```
 
 Start the collector and online processor:
@@ -147,10 +135,9 @@ source .venv/bin/activate
 python scripts/deploy.py \
   --model artifacts/model \
   --captures artifacts/captures \
-  --collector native/build/gpu-sentry-collector
+  --collector native/build-ubuntu20/gpu-sentry-collector
 ```
 
-Use `native/build-ubuntu20/gpu-sentry-collector` with the Docker build.
 CUDA applications can now run normally:
 
 ```bash
@@ -281,7 +268,7 @@ needs; GPU-Sentry does not impose a history strategy.
 Install the hook and start the collector:
 
 ```bash
-native/build/gpu-sentry-collector \
+native/build-ubuntu20/gpu-sentry-collector \
   --config config.json \
   --captures artifacts/captures
 ```

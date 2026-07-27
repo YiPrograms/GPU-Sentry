@@ -1,7 +1,7 @@
 # Reproducing the Experiments
 
 Run every command from the repository root with the virtual environment
-active. Follow the installation and native build instructions in
+active. Follow the installation and build instructions in
 [README.md](README.md) first.
 
 Results are written under `artifacts/` and are intentionally not versioned.

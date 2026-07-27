@@ -17,7 +17,7 @@ def main() -> int:
     parser.add_argument(
         "--collector",
         type=Path,
-        default=Path("native/build/gpu-sentry-collector"),
+        default=Path("native/build-ubuntu20/gpu-sentry-collector"),
     )
     args = parser.parse_args()
     if not args.collector.is_file():
