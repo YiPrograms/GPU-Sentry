@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from gpu_sentry.experiments.runner import run
+from gpu_sentry.experiments.runner import mixed_baseline
 
 
 def main() -> int:
@@ -16,8 +16,7 @@ def main() -> int:
     parser.add_argument("--runtime", type=int, default=180)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    args.experiment = "mixed-baseline"
-    return run(args, args.config.resolve())
+    return mixed_baseline(args, args.config.resolve())
 
 
 if __name__ == "__main__":

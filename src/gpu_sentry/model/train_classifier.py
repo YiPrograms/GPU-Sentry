@@ -29,76 +29,73 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class WeightedLossTrainerMixin:
-    def set_class_weights(self, weights: list[float]) -> None:
-        try:
-            import torch
-        except ImportError as exc:
-            raise RuntimeError("torch is required for weighted classification loss") from exc
-        self._class_weights = torch.tensor(weights, dtype=torch.float)
-
-    def compute_loss(
-        self,
-        model: Any,
-        inputs: dict[str, Any],
-        return_outputs: bool = False,
-        num_items_in_batch: Any = None,
-    ):
-        try:
-            import torch
-        except ImportError as exc:
-            raise RuntimeError("torch is required for weighted classification loss") from exc
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
-        logits = outputs.logits
-        weights = self._class_weights.to(logits.device)
-        loss_fct = torch.nn.CrossEntropyLoss(weight=weights)
-        loss = loss_fct(logits.reshape(-1, logits.shape[-1]), labels.reshape(-1))
-        return (loss, outputs) if return_outputs else loss
-
-
-def build_workload_trainer_class():
+def make_trainer(
+    *,
+    model: Any,
+    args: Any,
+    train_dataset: Any,
+    eval_dataset: Any,
+    data_collator: Any,
+    tokenizer: Any,
+    weights: list[float],
+    workload_records: Any,
+    workload_chunks: Any,
+    id2label: Any,
+    decision: dict[str, Any],
+):
     try:
+        import torch
         from transformers import Trainer
     except ImportError as exc:
-        raise RuntimeError("transformers is required for classifier training") from exc
+        raise RuntimeError("torch and transformers are required for classifier training") from exc
 
-    class WorkloadEvalTrainer(WeightedLossTrainerMixin, Trainer):
-        workload_eval_records: Any = None
-        workload_eval_chunks: Any = None
-        workload_id2label: Any = None
-        workload_eval_options: Any = None
-
-        def set_workload_eval(self, records: Any, chunks: Any, id2label: Any, **options: Any) -> None:
-            self.workload_eval_records = records
-            self.workload_eval_chunks = chunks
-            self.workload_id2label = id2label
-            self.workload_eval_options = options
+    class WorkloadTrainer(Trainer):
+        def compute_loss(
+            self,
+            model: Any,
+            inputs: dict[str, Any],
+            return_outputs: bool = False,
+            num_items_in_batch: Any = None,
+        ):
+            labels = inputs.pop("labels")
+            outputs = model(**inputs)
+            logits = outputs.logits
+            loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]),
+                labels.reshape(-1),
+                weight=self.class_weights.to(logits.device),
+            )
+            return (loss, outputs) if return_outputs else loss
 
         def evaluate(self, eval_dataset: Any = None, ignore_keys: Any = None, metric_key_prefix: str = "eval"):
             metrics = super().evaluate(eval_dataset, ignore_keys=ignore_keys, metric_key_prefix=metric_key_prefix)
-            if (
-                self.workload_eval_records is None
-                or self.workload_eval_chunks is None
-                or eval_dataset is not None
-            ):
+            if eval_dataset is not None:
                 return metrics
             predictions = self.predict(self.eval_dataset, metric_key_prefix=f"{metric_key_prefix}_chunks")
             probabilities = softmax_rows(predictions.predictions)
             workload_report = workload_metrics(
-                self.workload_eval_records,
-                self.workload_eval_chunks,
+                workload_records,
+                workload_chunks,
                 probabilities,
-                self.workload_id2label,
-                **(self.workload_eval_options or {}),
+                id2label,
+                history_windows=int(decision["history_windows"]),
+                mean_threshold=float(decision["mean_mining_probability"]),
+                max_threshold=float(decision["max_mining_probability"]),
             )
-            metrics[f"{metric_key_prefix}_accuracy"] = workload_report["accuracy"]
-            metrics[f"{metric_key_prefix}_macro_f1"] = workload_report["macro_f1"]
-            metrics[f"{metric_key_prefix}_micro_f1"] = workload_report["micro_f1"]
-            metrics[f"{metric_key_prefix}_weighted_f1"] = workload_report["weighted_f1"]
+            for name in ("accuracy", "macro_f1", "micro_f1", "weighted_f1"):
+                metrics[f"{metric_key_prefix}_{name}"] = workload_report[name]
             return metrics
 
-    return WorkloadEvalTrainer
+    trainer = WorkloadTrainer(
+        model=model,
+        args=args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        data_collator=data_collator,
+        processing_class=tokenizer,
+    )
+    trainer.class_weights = torch.tensor(weights, dtype=torch.float)
+    return trainer
 
 
 def main() -> None:
@@ -134,24 +131,19 @@ def main() -> None:
     output_dir = classifier_output_dir(run_config)
     collator = DataCollatorWithPadding(tokenizer=tokenizer, pad_to_multiple_of=8)
 
-    trainer_cls = build_workload_trainer_class()
-    trainer_kwargs = {
-        "model": model,
-        "args": training_args(output_dir, run_config.raw["classifier"], "eval_macro_f1", True),
-        "train_dataset": ChunkDataset(chunks_by_split["train"]),
-        "eval_dataset": ChunkDataset(chunks_by_split["val"]),
-        "data_collator": collator,
-    }
-    trainer = trainer_cls(**trainer_kwargs, processing_class=tokenizer)
-    trainer.set_class_weights(weights)
     decision = run_config.raw["decision"]
-    trainer.set_workload_eval(
-        records_by_split["val"],
-        chunks_by_split["val"],
-        run_config.id2label,
-        history_windows=int(decision["history_windows"]),
-        mean_threshold=float(decision["mean_mining_probability"]),
-        max_threshold=float(decision["max_mining_probability"]),
+    trainer = make_trainer(
+        model=model,
+        args=training_args(output_dir, run_config.raw["classifier"], "eval_macro_f1", True),
+        train_dataset=ChunkDataset(chunks_by_split["train"]),
+        eval_dataset=ChunkDataset(chunks_by_split["val"]),
+        data_collator=collator,
+        tokenizer=tokenizer,
+        weights=weights,
+        workload_records=records_by_split["val"],
+        workload_chunks=chunks_by_split["val"],
+        id2label=run_config.id2label,
+        decision=decision,
     )
 
     train_result = trainer.train()

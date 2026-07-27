@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from gpu_sentry.experiments.runner import run
+from gpu_sentry.experiments.runner import window_budget
 
 
 def main() -> int:
@@ -17,8 +17,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    args.experiment = "window-budget"
-    return run(args, args.config.resolve())
+    return window_budget(args, args.config.resolve())
 
 
 if __name__ == "__main__":

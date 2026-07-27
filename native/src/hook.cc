@@ -28,12 +28,8 @@ extern "C" {
 CUresult cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags) {
 	PFN_cuGetProcAddress_v11030 real = (PFN_cuGetProcAddress_v11030)real_cuGetProcAddress;
 
-	// DEBUG("cuGetProcAddress() searching for symbol %s", symbol);
-
-  // Look for our hooked function
   void *func = get_hooked_function(symbol);
 
-  // Not being hooked
   if (func == NULL) {
     return real(symbol, pfn, cudaVersion, flags);
   }
@@ -49,12 +45,8 @@ CUresult cuGetProcAddress_v2(const char *symbol, void **pfn, int cudaVersion,
 														 cuuint64_t flags, CUdriverProcAddressQueryResult *symbolStatus) {
 	PFN_cuGetProcAddress_v12000 real = (PFN_cuGetProcAddress_v12000)real_cuGetProcAddress_v2;
 
-	// DEBUG("cuGetProcAddress_v2() searching for symbol %s", symbol);
-
-  // Look for our hooked function
   void *func = get_hooked_function(symbol);
 
-  // Not being hooked
   if (func == NULL) {
     return real(symbol, pfn, cudaVersion, flags, symbolStatus);
   }

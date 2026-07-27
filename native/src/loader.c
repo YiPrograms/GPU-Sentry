@@ -15,7 +15,6 @@ extern char _binary_libcuda_so_1_real_end[];
 
 static void *dl_handle = NULL;
 
-// Declare a global pointer for each CUDA symbol we want to resolve.
 #define CUDA_SYMBOL(name) \
     void *real_##name __attribute__((visibility("hidden"))) = NULL;
 #include "cuda_symbols.def"
@@ -91,7 +90,6 @@ static void load_libcuda(void) {
 
 	DEBUG("Opened embedded CUDA library successfully.");
 
-	// Resolve each CUDA symbol and store the pointer in the corresponding global variable.
 #define CUDA_SYMBOL(name) \
 		resolve_symbol(#name, &real_##name);
 #include "cuda_symbols.def"

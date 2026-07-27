@@ -28,20 +28,6 @@ from .presets import (
 )
 
 
-def run(args: argparse.Namespace, config_path: Path) -> int:
-    if args.experiment == "window-budget":
-        return window_budget(args, config_path)
-    if args.experiment == "baseline-train":
-        return baseline_train(args, config_path)
-    if args.experiment == "throttle-gpu-sentry":
-        return throttle_gpu_sentry(args, config_path)
-    if args.experiment == "throttle-baseline":
-        return throttle_baseline(args, config_path)
-    if args.experiment == "mixed-baseline":
-        return mixed_baseline(args, config_path)
-    raise ValueError(args.experiment)
-
-
 def window_budget(args: argparse.Namespace, config_path: Path) -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     for budget in WINDOW_BUDGETS:

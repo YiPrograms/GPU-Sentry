@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from gpu_sentry.experiments.runner import run
+from gpu_sentry.experiments.runner import throttle_baseline
 
 
 def main() -> int:
@@ -17,8 +17,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    args.experiment = "throttle-baseline"
-    return run(args, args.config.resolve())
+    return throttle_baseline(args, args.config.resolve())
 
 
 if __name__ == "__main__":

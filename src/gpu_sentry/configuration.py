@@ -70,10 +70,6 @@ def load_config(path: str | Path = "config.json") -> ProjectConfig:
     return ProjectConfig(path=source, **{key: raw[key] for key in expected})
 
 
-def project_root(config: ProjectConfig) -> Path:
-    return config.path.parent
-
-
 def _positive(section: dict[str, Any], key: str) -> None:
     value = section.get(key)
     if not isinstance(value, (int, float)) or value <= 0:

@@ -147,12 +147,6 @@ def main(argv: list[str] | None = None) -> int:
             report["unmapped_captures_skipped"] += 1
             print(f"{progress} [SKIP] {result['capture']}: {result['reason']}", flush=True)
             continue
-        if result["status"] == "skipped_no_windows":
-            report["no_l0_windows_skipped"] += 1
-            if result.get("label"):
-                report["labels"][result["label"]] += 0
-            print(f"{progress} [SKIP] {result['capture']}: {result['reason']}", flush=True)
-            continue
         created = int(result.get("workloads_created", 1))
         report["workloads_created"] += created
         report["windows_created"] += int(result.get("windows_created", 0))
@@ -731,7 +725,6 @@ def new_build_report() -> dict[str, Any]:
         "duplicates_skipped": 0,
         "empty_captures_skipped": 0,
         "unmapped_captures_skipped": 0,
-        "no_l0_windows_skipped": 0,
         "failed_captures": 0,
         "windows_created": 0,
         "no_l0_window_rows_created": 0,
@@ -761,7 +754,6 @@ def print_summary(report: dict[str, Any]) -> None:
     print(f"duplicates skipped: {report['duplicates_skipped']}")
     print(f"empty captures skipped: {report['empty_captures_skipped']}")
     print(f"unmapped captures skipped: {report['unmapped_captures_skipped']}")
-    print(f"no L0 windows skipped: {report['no_l0_windows_skipped']}")
     print(f"failed captures: {report['failed_captures']}")
     print("\nlabels:")
     for label, count in sorted(report["labels"].items()):

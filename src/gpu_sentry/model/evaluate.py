@@ -62,7 +62,7 @@ def main() -> None:
         args=TrainingArguments(
             output_dir=str(config.paths.reports_dir / ".evaluation"),
             per_device_eval_batch_size=int(config.raw["classifier"]["per_device_eval_batch_size"]),
-            fp16=bool(config.raw["classifier"]["fp16"]) and torch.cuda.is_available(),
+            fp16=torch.cuda.is_available(),
             report_to=[],
             remove_unused_columns=False,
         ),

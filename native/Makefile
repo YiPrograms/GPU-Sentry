@@ -1,7 +1,6 @@
 CC       := gcc
 CXX      := g++
 LD       := ld
-OBJCOPY  := objcopy
 PYTHON   := python3
 GO       := go
 SUDO     ?= sudo
@@ -23,10 +22,6 @@ GO_SERVER := $(BUILD)/gpu-sentry-collector
 GO_ENV := GOCACHE=/tmp/gpu-sentry-go-cache GOMODCACHE=/tmp/gpu-sentry-go-modcache PATH=$(HOME)/go/bin:$(PATH)
 INCLUDES := -Iinclude -Iinclude/vendor
 CFLAGS := -O2 -Wall -Wextra -g -fPIC $(INCLUDES)
-
-CXXFLAGS = $(CFLAGS) -std=c++17
-
-LDFLAGS := -shared -ldl -lpthread
 
 OBJS := $(BUILD)/loader.o $(BUILD)/trampolines.o $(BUILD)/libcuda_blob.o $(BUILD)/hook.o $(BUILD)/code_registry.o $(BUILD)/telemetry.o $(BUILD)/telemetry_bridge.o
 
