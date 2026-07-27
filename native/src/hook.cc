@@ -278,6 +278,21 @@ CUresult cuLibraryGetModule(CUmodule *pMod, CUlibrary library) {
   return res;
 }
 
+#undef cuKernelGetFunction
+CUresult cuKernelGetFunction(CUfunction *pFunc, CUkernel kernel) {
+  PFN_cuKernelGetFunction_v12000 real =
+      (PFN_cuKernelGetFunction_v12000)real_cuKernelGetFunction;
+  CUresult res = real(pFunc, kernel);
+
+  if (res == CUDA_SUCCESS && pFunc != NULL) {
+    DEBUG("cuKernelGetFunction() called for kernel %p, returns function %p",
+          kernel, *pFunc);
+    copy_kernel_info(*pFunc, kernel);
+  }
+
+  return res;
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -300,6 +315,7 @@ static void *get_hooked_function(const char *symbol) {
   HOOK_FUNCTION(cuModuleGetFunction)
   HOOK_FUNCTION(cuLibraryGetKernel)
   HOOK_FUNCTION(cuLibraryGetModule)
+  HOOK_FUNCTION(cuKernelGetFunction)
 
   return NULL;
 }

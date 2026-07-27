@@ -316,6 +316,22 @@ void register_kernel(void *kernel_handle, void *owner_handle,
   DEBUG("kernel %p -> name %s, code ID %u", kernel_handle, name, code_id);
 }
 
+void copy_kernel_info(void *kernel_handle, void *source_handle) {
+  if (kernel_handle == nullptr || source_handle == nullptr) return;
+
+  std::lock_guard<std::mutex> lock(registry_mutex);
+  auto it = kernel_map.find(source_handle);
+  if (it == kernel_map.end()) {
+    DEBUG("kernel %p has no registered metadata", source_handle);
+    return;
+  }
+
+  const KernelRecord record = it->second;
+  kernel_map[kernel_handle] = record;
+  DEBUG("kernel %p -> kernel %p, name %s, code ID %u", kernel_handle,
+        source_handle, record.name.c_str(), record.code_id);
+}
+
 KernelInfo get_kernel_info(void *kernel_handle) {
   if (kernel_handle == nullptr) return KernelInfo{"", 0, false};
 

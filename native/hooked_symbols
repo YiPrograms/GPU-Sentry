@@ -12,3 +12,4 @@ cuLibraryLoadFromFile
 cuModuleGetFunction
 cuLibraryGetKernel
 cuLibraryGetModule
+cuKernelGetFunction
