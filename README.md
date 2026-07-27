@@ -108,6 +108,16 @@ hf download kuokuoyiyi/gpu-sentry-modernbert \
 
 GPU-Sentry loads the model from `artifacts/model`.
 
+Upload a trained model with the Hugging Face CLI:
+
+```bash
+scripts/upload_model.sh \
+  artifacts/model \
+  kuokuoyiyi/gpu-sentry-modernbert
+```
+
+See [MODEL.md](MODEL.md) for model release details.
+
 ## Deployment
 
 The build stores a driver-specific copy of the active NVIDIA library under

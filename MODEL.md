@@ -31,31 +31,32 @@ test -f artifacts/model/special_tokens_map.json
 
 ## Publishing a New Revision
 
-Train or place the export in `artifacts/model`, then upload the inference files:
+Train or place the export in `artifacts/model`, authenticate, and run the
+upload script:
 
 ```bash
-python - <<'PY'
-from huggingface_hub import HfApi
-
-repo_id = "kuokuoyiyi/gpu-sentry-modernbert"
-api = HfApi()
-api.create_repo(repo_id, repo_type="model", private=True, exist_ok=True)
-api.upload_folder(
-    repo_id=repo_id,
-    repo_type="model",
-    folder_path="artifacts/model",
-    allow_patterns=[
-        "README.md",
-        "SHA256SUMS",
-        "config.json",
-        "pytorch_model.bin",
-        "special_tokens_map.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-    ],
-    commit_message="Publish GPU-Sentry model",
-)
-PY
+hf auth login
+scripts/upload_model.sh \
+  artifacts/model \
+  kuokuoyiyi/gpu-sentry-modernbert
 ```
 
-Record the returned commit hash in `README.md` for reproducible deployments.
+The script uploads the model weights, tokenizer, model configuration, checksum
+file, and model card.
+
+The underlying Hugging Face CLI command is:
+
+```bash
+hf upload kuokuoyiyi/gpu-sentry-modernbert artifacts/model . \
+  --repo-type model \
+  --private \
+  --commit-message "Publish GPU-Sentry model" \
+  --include README.md \
+  --include SHA256SUMS \
+  --include config.json \
+  --include "model*.safetensors" \
+  --include "pytorch_model*.bin" \
+  --include special_tokens_map.json \
+  --include tokenizer.json \
+  --include tokenizer_config.json
+```
