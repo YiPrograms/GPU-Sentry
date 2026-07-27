@@ -45,7 +45,7 @@ src/gpu_sentry/online/       online processing and decision policies
 src/gpu_sentry/sass/         capture-to-SASS dataset pipeline
 src/gpu_sentry/model/        tokenizer, training, and evaluation
 src/gpu_sentry/baseline/     behavioral baseline
-src/gpu_sentry/experiments/  paper experiment presets and runners
+src/gpu_sentry/experiments/  experiment presets and runners
 workloads/                   benign and synthetic CUDA workloads
 artifacts/                   generated captures, models, and reports
 ```
@@ -295,128 +295,7 @@ native/build/gpu-sentry-collector \
 Run CUDA workloads in another shell. Each process creates a capture directory
 under `artifacts/captures/`.
 
-## Training
+## Reproducing Results
 
-```text
-CUDA workloads -> captures -> normalized SASS windows -> grouped splits
--> tokenizer -> MLM pretraining -> classifier fine-tuning -> model
-```
-
-Build the synthetic workloads for the target GPU:
-
-```bash
-python workloads/synthetic/scripts/build_binaries.py --cuda-arch sm_86 -j 8
-```
-
-Create a capture manifest:
-
-```bash
-python -m gpu_sentry.sass.capture_manifest \
-  --captures-dir artifacts/captures \
-  --binary-manifest workloads/synthetic/binaries/manifest.jsonl \
-  --output artifacts/captures/manifest.jsonl
-```
-
-Build the training dataset:
-
-```bash
-python scripts/build_dataset.py \
-  --purpose training \
-  --manifest artifacts/captures/manifest.jsonl \
-  --capture-root . \
-  --output artifacts/data/training \
-  --replace
-```
-
-Train the tokenizer, masked-language model, and classifier:
-
-```bash
-python scripts/train.py \
-  --data artifacts/data/training \
-  --output artifacts/model \
-  --gpus 1
-```
-
-`--gpus N` starts distributed training through `torchrun`.
-
-## Evaluation
-
-Build an evaluation dataset from held-out captures:
-
-```bash
-python scripts/build_dataset.py \
-  --purpose evaluation \
-  --manifest artifacts/evaluation/manifest.jsonl \
-  --capture-root . \
-  --output artifacts/data/evaluation \
-  --replace
-```
-
-Run evaluation:
-
-```bash
-python scripts/evaluate.py \
-  --dataset-dir artifacts/data/evaluation \
-  --checkpoint artifacts/model \
-  --split all \
-  --reports artifacts/reports/evaluation
-```
-
-## Paper Experiments
-
-### Window-Budget Selection
-
-```bash
-python scripts/window_budget.py \
-  --manifest artifacts/evaluation/manifest.jsonl \
-  --capture-root . \
-  --model artifacts/model \
-  --output artifacts/experiments/window-budget \
-  --jobs 8
-```
-
-### Behavioral Baseline Training
-
-```bash
-python scripts/baseline_train.py \
-  --manifest artifacts/baseline/train-manifest.jsonl \
-  --output artifacts/experiments/baseline \
-  --gpu 0
-```
-
-### Throttled Mining With GPU-Sentry
-
-Start `python scripts/deploy.py --model artifacts/model`, then run:
-
-```bash
-python scripts/throttle_gpu_sentry.py \
-  --output artifacts/experiments/throttle-gpu-sentry \
-  --gpu 0 \
-  --runtime 180 \
-  --repeats 1
-```
-
-### Throttled Mining With the Baseline
-
-```bash
-python scripts/throttle_baseline.py \
-  --model artifacts/experiments/baseline/model/model.joblib \
-  --output artifacts/experiments/throttle-baseline \
-  --gpu 0 \
-  --runtime 60 \
-  --repeats 1
-```
-
-### Mixed Benign and Mining Workloads
-
-```bash
-python scripts/mixed_baseline.py \
-  --model artifacts/experiments/baseline/model/model.joblib \
-  --output artifacts/experiments/mixed-baseline \
-  --gpu 0 \
-  --runtime 180
-```
-
-Each experiment script supports `--dry-run`. See
-[REPRODUCING.md](REPRODUCING.md) for the workload matrices and reporting
-requirements.
+See [REPRODUCING.md](REPRODUCING.md) for dataset preparation, model training,
+evaluation, and the experiment commands used in the paper.

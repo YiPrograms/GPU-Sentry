@@ -1,10 +1,96 @@
-# Reproducing the experiments
+# Reproducing the Experiments
 
-Run every command from the repository root with the virtual environment active. Build the native components and synthetic binaries as described in `README.md`. Results are generated under `artifacts/experiments/` and are intentionally not versioned.
+Run every command from the repository root with the virtual environment
+active. Follow the installation and native build instructions in
+[README.md](README.md) first.
 
-Use the same physical GPU, CUDA/driver stack, clocks, power limit, and idle-system policy across compared runs. Record those details, the Git commit, `config.json`, and command output with the resulting artifacts. Unless stated otherwise, select the GPU with `--gpu 0`.
+Results are written under `artifacts/` and are intentionally not versioned.
+Use the same physical GPU, CUDA and driver stack, clocks, power limit, and
+idle-system policy across compared runs. Record those details, the Git commit,
+`config.json`, and command output with the resulting artifacts. Unless stated
+otherwise, select the GPU with `--gpu 0`.
 
-## 1. Window-budget selection
+## Workloads
+
+Build the synthetic workloads for the target GPU. Replace `sm_86` with the
+compute capability of the evaluation GPU:
+
+```bash
+python workloads/synthetic/scripts/build_binaries.py --cuda-arch sm_86 -j 8
+```
+
+Install the hook and run the collector as described in the capturing section
+of [README.md](README.md). Run the training and evaluation workloads to create
+captures under `artifacts/captures/`.
+
+## Dataset Preparation
+
+Create a manifest from the training captures:
+
+```bash
+python -m gpu_sentry.sass.capture_manifest \
+  --captures-dir artifacts/captures \
+  --binary-manifest workloads/synthetic/binaries/manifest.jsonl \
+  --output artifacts/captures/manifest.jsonl
+```
+
+Build the training dataset:
+
+```bash
+python scripts/build_dataset.py \
+  --purpose training \
+  --manifest artifacts/captures/manifest.jsonl \
+  --capture-root . \
+  --output artifacts/data/training \
+  --replace
+```
+
+## Model Training
+
+The training workflow is:
+
+```text
+captures -> normalized SASS windows -> grouped splits -> tokenizer
+-> masked-language-model pretraining -> classifier fine-tuning -> model
+```
+
+Train the tokenizer, masked-language model, and classifier:
+
+```bash
+python scripts/train.py \
+  --data artifacts/data/training \
+  --output artifacts/model \
+  --gpus 1
+```
+
+`--gpus N` starts distributed training through `torchrun`.
+
+## Model Evaluation
+
+Build an evaluation dataset from held-out captures:
+
+```bash
+python scripts/build_dataset.py \
+  --purpose evaluation \
+  --manifest artifacts/evaluation/manifest.jsonl \
+  --capture-root . \
+  --output artifacts/data/evaluation \
+  --replace
+```
+
+Run evaluation:
+
+```bash
+python scripts/evaluate.py \
+  --dataset-dir artifacts/data/evaluation \
+  --checkpoint artifacts/model \
+  --split all \
+  --reports artifacts/reports/evaluation
+```
+
+## Paper Experiments
+
+### 1. Window-Budget Selection
 
 Provide a held-out capture manifest containing both benign and mining workloads and a trained 8,192-token model:
 
@@ -21,7 +107,7 @@ The runner evaluates content-token budgets 512, 1,024, 2,048, 3,072, 4,096, 5,12
 
 Use `--dry-run` to print the full matrix without executing it. The normal training and deployment budgets remain those in `config.json`.
 
-## 2. Behavioral baseline training
+### 2. Behavioral Baseline Training
 
 Prepare one or more JSONL workload manifests. Each row must contain `argv`, `workload`, `binary_label`, and may contain `label`, `family`, `program`, `variant`, `cwd`, and `runtime_sec`. Commands should cover the benign and mining training workloads used for the detector comparison.
 
@@ -34,7 +120,7 @@ python scripts/baseline_train.py \
 
 The collector samples GPU utilization, memory utilization, power, and temperature. Training uses a grouped split with seed 1,337, a 200-tree point-level random forest, and a validation threshold selected at a maximum run-level false-positive rate of 0.01. The model is written to `artifacts/experiments/baseline/model/model.joblib`.
 
-## 3. Throttled mining with GPU-Sentry
+### 3. Throttled Mining With GPU-Sentry
 
 Start online deployment in one shell:
 
@@ -54,7 +140,7 @@ python scripts/throttle_gpu_sentry.py \
 
 The matrix contains `ethash_split`, `kawpow_split`, `randomx_gpu_lite_mono`, and `sha256d_mono`, each at target launch rates 5%, 10%, 50%, 75%, and 100%. A 15-second unthrottled pilot estimates launch rate; the runner converts each target percentage to an inter-launch sleep. Captures are labeled with miner, family, target percentage, and repeat.
 
-## 4. Throttled mining with the behavioral baseline
+### 4. Throttled Mining With the Behavioral Baseline
 
 ```bash
 python scripts/throttle_baseline.py \
@@ -67,7 +153,7 @@ python scripts/throttle_baseline.py \
 
 This matrix contains `autolykos2_split`, `cryptonight_gpu_split`, `cuckoo_cycle_split`, `equihash144_5_split`, `ethash_split`, `kawpow_split`, `randomx_gpu_lite_mono`, and `sha256d_mono`, each at 5%, 10%, 25%, 50%, 75%, and 100%. It uses the same pilot calibration method, records counter samples, builds point features, and scores them with the trained baseline.
 
-## 5. Mixed workloads with the behavioral baseline
+### 5. Mixed Workloads With the Behavioral Baseline
 
 ```bash
 python scripts/mixed_baseline.py \
